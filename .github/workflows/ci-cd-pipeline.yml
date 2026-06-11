@@ -80,11 +80,6 @@ jobs:
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
-      
-      - name: Create ECR Repository
-        run: |
-          aws ecr describe-repositories --repository-names ecommerce/${{ matrix.service }} --region $AWS_REGION 2>/dev/null || \
-            aws ecr create-repository --repository-name ecommerce/${{ matrix.service }} --region $AWS_REGION
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -133,7 +128,8 @@ jobs:
   # Build & Deploy Frontend
   deploy-frontend:
     name: Deploy Frontend
-    needs: lint-and-test
+    needs: [terraform-apply]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -143,14 +139,10 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Dependencies
+      - name: Install & Build
         run: |
           cd frontend/react-vite-app
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
-      - name: Build Frontend
-        run: |
-          cd frontend/react-vite-app
+          npm ci
           npm run build
 
       - name: Configure AWS Credentials
@@ -162,16 +154,15 @@ jobs:
 
       - name: Deploy to S3
         run: |
-          cd frontend/react-vite-app
-          BUCKET=$(aws s3 ls | grep ecommerce-frontend-dev | awk '{print $3}')
+          cd terraform/environments/dev
+          terraform init -backend-config="key=dev/terraform.tfstate" > /dev/null 2>&1
+          BUCKET=$(terraform output -raw frontend_bucket)
+          cd ../../../frontend/react-vite-app
           aws s3 sync dist/ "s3://${BUCKET}/" --delete
 
-      - name: Invalidate CloudFront Cache
-        run: |
-          CF_DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Aliases.Items[0]=='dev.cloudforsushant.xyz'].Id" --output text)
-          if [ -n "$CF_DIST_ID" ]; then
-            aws cloudfront create-invalidation --distribution-id "$CF_DIST_ID" --paths "/*"
-          fi
+          CF_ID=$(cd ../../terraform/environments/dev && terraform output -raw cloudfront_id)
+          aws cloudfront create-invalidation --distribution-id "$CF_ID" --paths "/*"
+
   # Terraform Plan (PR only)
   terraform-plan:
     name: Terraform Plan
@@ -233,7 +224,7 @@ jobs:
   terraform-apply:
     name: Terraform Apply - Dev
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [build-services, build-lambda, deploy-frontend]
+    needs: [build-services, build-lambda]
     runs-on: ubuntu-latest
     environment:
       name: dev

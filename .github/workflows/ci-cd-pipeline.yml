@@ -269,15 +269,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Deploy to S3
+      - name: Get S3 Bucket
         run: |
           cd terraform/environments/dev
           terraform init -reconfigure -backend-config="key=dev/terraform.tfstate" > /dev/null 2>&1
-          BUCKET=$(terraform output -raw frontend_bucket)
-          cd ../../../frontend/react-vite-app
-          aws s3 sync dist/ "s3://${BUCKET}/" --delete
-          CF_ID=$(cd ../../terraform/environments/dev && terraform output -raw cloudfront_id)
-          aws cloudfront create-invalidation --distribution-id "$CF_ID" --paths "/*
+          echo "BUCKET=$(terraform output -raw frontend_bucket)" >> $GITHUB_ENV
+          echo "CF_ID=$(terraform output -raw cloudfront_id)" >> $GITHUB_ENV
+
+      - name: Deploy to S3
+        run: |
+          cd frontend/react-vite-app
+          aws s3 sync dist/ "s3://${{ env.BUCKET }}/" --delete
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation --distribution-id "${{ env.CF_ID }}" --paths "/*"
 
   # Deploy to Production (manual approval)
   deploy-prod:

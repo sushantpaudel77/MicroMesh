@@ -11,11 +11,13 @@ domain_name = "example.com"
 # ACM Certificate (replace with your own)
 acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/example-certificate-id"
 
+time_period_start   = "2026-06-01_00:00"
+
 # Networking
 vpc_cidr = "10.10.0.0/16"
 
 # Alerts
-alarm_email = "alerts@example.com"
+admin_email = "alerts@example.com"
 
 # WAF
 waf_enable_rate_limiting = false
@@ -27,3 +29,4 @@ tags = {
   Project     = "ecommerce"
   ManagedBy   = "terraform"
 }
+

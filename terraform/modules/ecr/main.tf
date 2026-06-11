@@ -1,6 +1,4 @@
-# ============================================
 # ECR Repositories - for_each on services map
-# ============================================
 resource "aws_ecr_repository" "main" {
   for_each = var.services
 
@@ -21,9 +19,7 @@ resource "aws_ecr_repository" "main" {
   })
 }
 
-# ============================================
 # Lifecycle Policy - Keep last 10 images
-# ============================================
 resource "aws_ecr_lifecycle_policy" "main" {
   for_each = var.services
 

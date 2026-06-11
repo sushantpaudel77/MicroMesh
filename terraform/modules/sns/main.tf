@@ -5,10 +5,25 @@ resource "aws_sns_topic" "main" {
   tags = var.tags
 }
 
-# Subscribe alarm email to alarm topic (only if key exists)
-resource "aws_sns_topic_subscription" "alarms" {
-  for_each  = contains(keys(var.topics), "alarms") ? { alarms = "alarms" } : {}
+# Email Subscription - For ORDER events & ALARMS
+resource "aws_sns_topic_subscription" "email_order" {
+  for_each = {
+    for k, v in var.topics : k => v
+    if v == "order-events"
+  }
+
   topic_arn = aws_sns_topic.main[each.key].arn
   protocol  = "email"
-  endpoint  = var.alarm_email
+  endpoint  = var.admin_email  
+}
+
+resource "aws_sns_topic_subscription" "email_alarms" {
+  for_each = {
+    for k, v in var.topics : k => v
+    if v == "alarms"
+  }
+
+  topic_arn = aws_sns_topic.main[each.key].arn
+  protocol  = "email"
+  endpoint  = var.admin_email
 }

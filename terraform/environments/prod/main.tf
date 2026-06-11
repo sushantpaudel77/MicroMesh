@@ -205,24 +205,32 @@ module "api_gateway" {
 }
 
 # MODULE: WAF
+# CloudFront-scoped WAF MUST be in us-east-1 — use the alias provider
 module "waf" {
   source = "../../modules/waf"
+  providers = {
+    aws = aws.us_east_1
+  }
 
   environment          = var.environment
   project_name         = var.project_name
-  enable_rate_limiting = false
+  enable_rate_limiting = true
   rate_limit           = 200
   tags                 = var.tags
 }
 
 # MODULE: Frontend
+# S3 + CloudFront resources must be in us-east-1
 module "frontend" {
   source = "../../modules/frontend"
+  providers = {
+    aws = aws.us_east_1
+  }
 
   environment         = var.environment
   project_name        = var.project_name
   domain_name         = var.domain_name
-  subdomain           = "dev"
+  subdomain           = "www"
   acm_certificate_arn = var.acm_certificate_arn
   waf_acl_arn         = module.waf.web_acl_arn
   api_endpoint        = module.api_gateway.api_endpoint
@@ -326,4 +334,16 @@ module "ecr" {
   project_name = var.project_name
   services     = local.services
   tags         = var.tags
+}
+module "budget" {
+  source = "../../modules/budget"
+
+  environment        = var.environment
+  project_name       = var.project_name
+  budget_amount      = 20  # $20 USD for prod
+  notification_email = var.alarm_email
+  sns_topic_arns     = [module.sns.topic_arns["alarms"]]
+  enable_anomaly_detection = true  # Prod: enable
+
+  tags = var.tags
 }

@@ -28,9 +28,16 @@ class Settings(BaseSettings):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        # Read DB password from ECS env var (injected by Secrets Manager)
+        if os.getenv('DB_HOST'):
+            self.db_host = os.getenv('DB_HOST')
+        if os.getenv('DB_NAME'):
+            self.db_name = os.getenv('DB_NAME')
+        if os.getenv('DB_USER'):
+            self.db_user = os.getenv('DB_USER')
         if os.getenv('DB_PASSWORD'):
             self.db_password = os.getenv('DB_PASSWORD')
+        if os.getenv('DB_PORT'):
+            self.db_port = int(os.getenv('DB_PORT'))
         
         if self.environment != "local":
             self._load_from_parameter_store()

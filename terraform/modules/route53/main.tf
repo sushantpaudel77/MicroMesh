@@ -1,14 +1,10 @@
-# ============================================
 # Get existing Hosted Zone
-# ============================================
 data "aws_route53_zone" "main" {
   name         = var.domain_name
   private_zone = false
 }
 
-# ============================================
 # A Record - Root Domain
-# ============================================
 resource "aws_route53_record" "root" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = var.domain_name
@@ -21,9 +17,7 @@ resource "aws_route53_record" "root" {
   }
 }
 
-# ============================================
 # A Record - www Subdomain
-# ============================================
 resource "aws_route53_record" "www" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "www.${var.domain_name}"
@@ -36,9 +30,7 @@ resource "aws_route53_record" "www" {
   }
 }
 
-# ============================================
 # A Record - Dev Subdomain (only if dev environment)
-# ============================================
 resource "aws_route53_record" "dev" {
   count = var.create_dev_record ? 1 : 0
 
@@ -53,9 +45,7 @@ resource "aws_route53_record" "dev" {
   }
 }
 
-# ============================================
 # Validation Record for ACM Certificate (if needed)
-# ============================================
 resource "aws_route53_record" "cert_validation" {
   for_each = var.create_cert_validation ? {
     for dvo in var.cert_validation_options : dvo.domain_name => {

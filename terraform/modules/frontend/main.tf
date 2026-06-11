@@ -1,5 +1,5 @@
 locals {
-  # Use account ID for uniqueness (always lowercase + numbers)
+  # Use account ID for uniqueness 
   bucket_name = "${var.project_name}-frontend-${var.environment}-${data.aws_caller_identity.current.account_id}"
   fqdn        = var.subdomain == "" ? var.domain_name : "${var.subdomain}.${var.domain_name}"
 }

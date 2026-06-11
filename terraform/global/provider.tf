@@ -14,9 +14,9 @@ terraform {
   }
 }
 
-# Configure the AWS Provider
+# State backend resources must live in us-east-1 (matches all environment backend configs).
 provider "aws" {
-  region = var.aws_region
+  region = "us-east-1"
 
   default_tags {
     tags = var.tags

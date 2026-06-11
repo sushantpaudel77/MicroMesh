@@ -14,7 +14,7 @@ output "backend_config" {
     for env in var.environments : env => {
       bucket         = aws_s3_bucket.terraform_state.id
       key            = "${env}/terraform.tfstate"
-      region         = var.aws_region
+      region         = "us-east-1"
       encrypt        = true
     }
   }

@@ -1,6 +1,4 @@
-# ============================================
 # SSM Parameters
-# ============================================
 
 # Custom Parameters
 resource "aws_ssm_parameter" "main" {

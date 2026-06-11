@@ -1,19 +1,48 @@
 #!/bin/bash
 
 # Load products into DynamoDB
-# Usage: ./load-products.sh <region>
+# Usage: ./load-products.sh <environment> <region>
+# Example: ./load-products.sh dev us-east-1
 
-TABLE_NAME="ecommerce-dev-products"
-REGION=$1
+set -e
 
-if [ -z "$REGION" ]; then
-    echo "Error: Region is required"
-    echo "Usage: ./load-products.sh <region>"
-    echo "Example: ./load-products.sh us-east-1"
-    exit 1
+ENV=${1:-dev}
+REGION=${2:-us-east-1}
+PROJECT="ecommerce"
+
+# ============================================
+# Get table names dynamically
+# ============================================
+TABLE_NAME="${PROJECT}-${ENV}-products"
+CARTS_TABLE="${PROJECT}-${ENV}-cart"
+
+# Try to get from SSM first (if Terraform deployed)
+TABLE_NAME_SSM=$(aws ssm get-parameter \
+    --name "/${PROJECT}/${ENV}/dynamodb/products-table" \
+    --region "$REGION" \
+    --query 'Parameter.Value' \
+    --output text 2>/dev/null || echo "")
+
+if [ -n "$TABLE_NAME_SSM" ] && [ "$TABLE_NAME_SSM" != "None" ]; then
+    TABLE_NAME="$TABLE_NAME_SSM"
 fi
 
-echo "Loading products into DynamoDB table: $TABLE_NAME"
+CARTS_TABLE_SSM=$(aws ssm get-parameter \
+    --name "/${PROJECT}/${ENV}/dynamodb/cart-table" \
+    --region "$REGION" \
+    --query 'Parameter.Value' \
+    --output text 2>/dev/null || echo "")
+
+if [ -n "$CARTS_TABLE_SSM" ] && [ "$CARTS_TABLE_SSM" != "None" ]; then
+    CARTS_TABLE="$CARTS_TABLE_SSM"
+fi
+
+echo "============================================"
+echo "  📦 Load Products into DynamoDB"
+echo "============================================"
+echo "Environment: $ENV"
+echo "Products Table: $TABLE_NAME"
+echo "Carts Table: $CARTS_TABLE"
 echo "Region: $REGION"
 echo ""
 
@@ -24,56 +53,14 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-# Check if table exists, create if not
+# Check if products table exists
 echo "Checking if table $TABLE_NAME exists..."
 if ! aws dynamodb describe-table --table-name "$TABLE_NAME" --region "$REGION" > /dev/null 2>&1; then
-    echo "Table $TABLE_NAME does not exist. Creating..."
-    
-    aws dynamodb create-table \
-        --table-name "$TABLE_NAME" \
-        --attribute-definitions AttributeName=product_id,AttributeType=S \
-        --key-schema AttributeName=product_id,KeyType=HASH \
-        --billing-mode PAY_PER_REQUEST \
-        --region "$REGION"
-    
-    if [ $? -eq 0 ]; then
-        echo "✓ Table created successfully"
-        echo "Waiting for table to become active..."
-        aws dynamodb wait table-exists --table-name "$TABLE_NAME" --region "$REGION"
-        echo "✓ Table is now active"
-    else
-        echo "✗ Failed to create table"
-        exit 1
-    fi
-else
-    echo "✓ Table $TABLE_NAME already exists"
+    echo "❌ Table $TABLE_NAME does not exist!"
+    echo "Deploy infrastructure first or create table manually."
+    exit 1
 fi
-
-# Also check/create carts table if it doesn't exist
-CARTS_TABLE="ecommerce-dev-cart"
-echo "Checking if table $CARTS_TABLE exists..."
-if ! aws dynamodb describe-table --table-name "$CARTS_TABLE" --region "$REGION" > /dev/null 2>&1; then
-    echo "Table $CARTS_TABLE does not exist. Creating..."
-    
-    aws dynamodb create-table \
-        --table-name "$CARTS_TABLE" \
-        --attribute-definitions AttributeName=user_id,AttributeType=S \
-        --key-schema AttributeName=user_id,KeyType=HASH \
-        --billing-mode PAY_PER_REQUEST \
-        --region "$REGION"
-    
-    if [ $? -eq 0 ]; then
-        echo "✓ Carts table created successfully"
-        echo "Waiting for carts table to become active..."
-        aws dynamodb wait table-exists --table-name "$CARTS_TABLE" --region "$REGION"
-        echo "✓ Carts table is now active"
-    else
-        echo "✗ Failed to create carts table"
-        exit 1
-    fi
-else
-    echo "✓ Table $CARTS_TABLE already exists"
-fi
+echo "✓ Table $TABLE_NAME exists"
 echo ""
 
 # Read products from JSON file
@@ -91,16 +78,17 @@ echo ""
 
 # Load each product
 COUNTER=0
+SUCCESS=0
+FAILED=0
+
 jq -c '.[]' "$PRODUCTS_FILE" | while read -r product; do
     COUNTER=$((COUNTER + 1))
     
-    # Extract product details for display
     PRODUCT_ID=$(echo "$product" | jq -r '.product_id')
     NAME=$(echo "$product" | jq -r '.name')
     
-    echo "[$COUNTER/$TOTAL] Loading: $NAME ($PRODUCT_ID)"
+    echo -n "[$COUNTER/$TOTAL] $NAME ($PRODUCT_ID) ... "
     
-    # Convert JSON to DynamoDB format
     ITEM=$(echo "$product" | jq '{
         product_id: {S: .product_id},
         name: {S: .name},
@@ -111,31 +99,19 @@ jq -c '.[]' "$PRODUCTS_FILE" | while read -r product; do
         image_url: {S: .image_url}
     }')
     
-    # Put item into DynamoDB and capture output
-    ERROR_OUTPUT=$(aws dynamodb put-item \
+    if aws dynamodb put-item \
         --table-name "$TABLE_NAME" \
         --item "$ITEM" \
-        --region "$REGION" 2>&1)
-    
-    if [ $? -eq 0 ]; then
-        echo "  ✓ Success"
+        --region "$REGION" > /dev/null 2>&1; then
+        echo "✅"
     else
-        echo "  ✗ Failed"
-        echo "  Error details: $ERROR_OUTPUT"
-        echo ""
-        echo "❌ Loading failed. Stopping to avoid further errors."
-        echo ""
-        echo "Common solutions:"
-        echo "  • Check AWS credentials: aws sts get-caller-identity"
-        echo "  • Verify table exists: aws dynamodb describe-table --table-name $TABLE_NAME --region $REGION"
-        echo "  • Check permissions for DynamoDB"
-        echo ""
-        exit 1
+        echo "❌"
     fi
-    echo ""
 done
 
-echo "Loading complete!"
 echo ""
-echo "Verify with:"
-echo "aws dynamodb scan --table-name $TABLE_NAME --region $REGION --query 'Count'"
+echo "============================================"
+echo "✅ Loading complete!"
+echo "============================================"
+echo ""
+echo "Verify: aws dynamodb scan --table-name $TABLE_NAME --region $REGION --query 'Count'"

@@ -1,20 +1,18 @@
 variable "environment" {
-  description = "Environment name"
-  type        = string
+  type = string
 }
 
 variable "project_name" {
-  description = "Project name"
-  type        = string
+  type = string
 }
 
 variable "db_host" {
-  description = "RDS host endpoint address"
+  description = "RDS host (can be empty initially)"
   type        = string
+  default     = "pending"
 }
 
 variable "tags" {
-  description = "Common tags"
-  type        = map(string)
-  default     = {}
+  type    = map(string)
+  default = {}
 }

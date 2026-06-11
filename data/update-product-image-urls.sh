@@ -1,48 +1,36 @@
 #!/bin/bash
 
-# Update products.json with CloudFront image URLs
-# Usage: ./update-product-image-urls.sh <cloudfront-base-url>
-# Example: ./update-product-image-urls.sh https://d1234567890.cloudfront.net
+# Update product image URLs with CloudFront domain
+# Usage: ./update-product-image-urls.sh <environment> <region>
 
-CLOUDFRONT_URL=${1%/}  # strip trailing slash if present
-IMAGE_PREFIX="images/products"
-PRODUCTS_FILE="products.json"
+ENV=${1:-dev}
+REGION=${2:-us-east-1}
 
-if [ -z "$CLOUDFRONT_URL" ]; then
-    echo "Error: CloudFront base URL is required"
-    echo "Usage: ./update-product-image-urls.sh <cloudfront-base-url>"
-    echo "Example: ./update-product-image-urls.sh https://d1234567890.cloudfront.net"
+# Get CloudFront domain
+CF_DOMAIN=$(aws ssm get-parameter \
+    --name "/ecommerce/${ENV}/frontend-url" \
+    --region "$REGION" \
+    --query 'Parameter.Value' \
+    --output text 2>/dev/null | sed 's|https://||' || echo "")
+
+if [ -z "$CF_DOMAIN" ]; then
+    echo "❌ Could not get CloudFront domain!"
     exit 1
 fi
 
-if [ ! -f "$PRODUCTS_FILE" ]; then
-    echo "Error: $PRODUCTS_FILE not found"
-    exit 1
-fi
+echo "CloudFront Domain: $CF_DOMAIN"
 
-if ! command -v jq &> /dev/null; then
-    echo "Error: jq is required but not installed."
-    echo "Install with: sudo apt-get install jq (Ubuntu/Debian) or brew install jq (Mac)"
-    exit 1
-fi
+cd "$(dirname "$0")"
+python3 -c "
+import json
+cf_domain = '${CF_DOMAIN}'
+with open('products.json') as f:
+    products = json.load(f)
+for p in products:
+    pid = p['product_id']
+    p['image_url'] = f'https://{cf_domain}/images/products/{pid}.jpg'
+with open('products.json', 'w') as f:
+    json.dump(products, f, indent=2)
+"
 
-echo "Updating product image URLs in $PRODUCTS_FILE..."
-echo "CloudFront URL: $CLOUDFRONT_URL"
-echo ""
-
-cp "$PRODUCTS_FILE" "${PRODUCTS_FILE}.backup"
-echo "Backup created: ${PRODUCTS_FILE}.backup"
-
-jq --arg base "$CLOUDFRONT_URL" \
-   --arg prefix "$IMAGE_PREFIX" \
-   'map(.image_url = "\($base)/\($prefix)/\(.product_id).jpg")' \
-   "$PRODUCTS_FILE" > "${PRODUCTS_FILE}.tmp"
-
-mv "${PRODUCTS_FILE}.tmp" "$PRODUCTS_FILE"
-
-echo "Updated image URLs in $PRODUCTS_FILE"
-echo ""
-echo "Sample URL:"
-jq -r '.[0].image_url' "$PRODUCTS_FILE"
-echo ""
-echo "Next step: Load products into DynamoDB with ./load-products.sh <region>"
+echo "✅ Product image URLs updated!"

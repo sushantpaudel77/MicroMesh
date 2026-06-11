@@ -1,25 +1,21 @@
 variable "environment" {
-  description = "Environment name"
-  type        = string
+  type = string
 }
 
 variable "project_name" {
-  description = "Project name"
-  type        = string
+  type = string
 }
 
 variable "topics" {
-  description = "SNS topics map"
-  type        = map(string)
+  type = map(string)
 }
 
-variable "alarm_email" {
-  description = "Email for alarm subscription"
+variable "admin_email" {
+  description = "Email for order confirmations and system alarms"
   type        = string
 }
 
 variable "tags" {
-  description = "Common tags"
-  type        = map(string)
-  default     = {}
+  type    = map(string)
+  default = {}
 }

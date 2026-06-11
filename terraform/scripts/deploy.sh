@@ -183,7 +183,7 @@ terraform init -reconfigure -upgrade || {
     echo -e "${YELLOW}Troubleshooting:${NC}"
     echo "  1. Check if bucket exists: aws s3 ls s3://${STATE_BUCKET}"
     echo "  2. Run init-backend.sh first: ./scripts/init-backend.sh"
-    echo "  3. Or create bucket manually: aws s3 mb s3://${STATE_BUCKET} --region ${REGION}"
+    echo "  3. Or create bucket manually: aws s3 mb s3://${STATE_BUCKET} --region us-east-1"
     exit 1
 }
 

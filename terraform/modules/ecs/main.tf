@@ -39,34 +39,34 @@ resource "aws_ecs_task_definition" "main" {
         protocol      = "tcp"
       }]
 
-      environment = concat(
-        # Base environment variables for ALL services
-        [
-          { name = "ENVIRONMENT", value = var.environment },
-          { name = "AWS_REGION", value = var.aws_region },
-          { name = "REDIS_HOST", value = var.redis_host },
-          { name = "REDIS_PORT", value = var.redis_port }
-        ],
-        # Service-specific table names
-        each.value.name == "product-service" ? [
-          { name = "PRODUCTS_TABLE", value = var.dynamodb_table_names["products"] }
-        ] : [],
-        each.value.name == "cart-service" ? [
-          { name = "CARTS_TABLE", value = var.dynamodb_table_names["cart"] }
-        ] : [],
-        each.value.name == "shipping-service" ? [
-          { name = "SHIPPING_TABLE", value = var.dynamodb_table_names["shipping"] }
-        ] : [],
-        # DB secret ARN for services that need it
-        each.value.name == "user-service" || each.value.name == "order-service" ? [
-          { name = "DB_SECRET_ARN", value = var.db_secret_arn }
-        ] : []
-      )
+      environment = [
+        { name = "ENVIRONMENT", value = var.environment },
+        { name = "AWS_REGION", value = var.aws_region },
+        { name = "REDIS_HOST", value = var.redis_host },
+        { name = "REDIS_PORT", value = var.redis_port },
+        { name = "PRODUCTS_TABLE", value = lookup(var.dynamodb_table_names, "products", "") },
+        { name = "CARTS_TABLE", value = lookup(var.dynamodb_table_names, "cart", "") },
+        { name = "SHIPPING_TABLE", value = lookup(var.dynamodb_table_names, "shipping", "") },
+        { name = "DB_SECRET_ARN", value = var.db_secret_arn }
+      ]
 
+      # Secrets: Reference specific JSON keys
       secrets = each.value.name == "user-service" || each.value.name == "order-service" ? [
         {
           name      = "DB_PASSWORD"
           valueFrom = "${var.db_secret_arn}:password::"
+        },
+        {
+          name      = "DB_USER"
+          valueFrom = "${var.db_secret_arn}:username::"
+        },
+        {
+          name      = "DB_HOST"
+          valueFrom = "${var.db_secret_arn}:host::"
+        },
+        {
+          name      = "DB_NAME"
+          valueFrom = "${var.db_secret_arn}:dbname::"
         }
       ] : []
 

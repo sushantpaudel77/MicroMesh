@@ -8,6 +8,7 @@ on:
       - 'frontend/**'
       - 'lambda/**'
       - 'terraform/**'
+      - 'data/**'
   pull_request:
     branches: [main]
 
@@ -153,8 +154,12 @@ jobs:
 
       - name: Deploy to S3
         run: |
-          aws s3 sync frontend/react-vite-app/dist/ s3://ecommerce-frontend-dev/ --delete --exclude "images/*"
-
+          # Get bucket from Terraform output or SSM
+           BUCKET=$(aws ssm get-parameter --name "/ecommerce/dev/frontend-url" --region $AWS_REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+            if [ -z "$BUCKET" ]; then
+          BUCKET=$(aws s3 ls | grep ecommerce-frontend-dev | awk '{print $3}')
+          fi
+          aws s3 sync frontend/react-vite-app/dist/ "s3://${BUCKET}/" --delete
       - name: Invalidate CloudFront Cache
         run: |
           CF_DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Aliases.Items[0]=='dev.cloudforsushant.xyz'].Id" --output text)
@@ -192,7 +197,13 @@ jobs:
         with:
           name: lambda-shipping-processor
           path: terraform/modules/lambda/
-
+      - name: Create tfvars
+        run: |
+          cat > terraform/environments/${{ matrix.environment }}/terraform.auto.tfvars << EOF
+          admin_email = "${{ secrets.ADMIN_EMAIL }}"
+          domain_name = "${{ secrets.DOMAIN_NAME }}"
+          acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
+          EOF
       - name: Terraform Init
         run: |
           cd terraform/environments/${{ matrix.environment }}
@@ -244,6 +255,14 @@ jobs:
           name: lambda-shipping-processor
           path: terraform/modules/lambda/
 
+      - name: Create tfvars
+        run: |
+          cat > terraform/environments/dev/terraform.auto.tfvars << EOF
+          admin_email = "${{ secrets.ADMIN_EMAIL }}"
+          domain_name = "${{ secrets.DOMAIN_NAME }}"
+          acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
+          EOF
+
       - name: Terraform Init
         run: |
           cd terraform/environments/dev
@@ -258,6 +277,41 @@ jobs:
         run: |
           echo "Dev environment deployed successfully!"
           echo "https://dev.cloudforsushant.xyz"
+
+  seed-data:
+    name: Seed Product Data
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      # Step 1: Upload product images to S3
+      - name: Upload Product Images to S3
+        run: |
+          cd data
+          bash upload-images-to-s3.sh dev $AWS_REGION
+
+      # Step 2: Update image URLs with CloudFront domain
+      - name: Update Product Image URLs
+        run: |
+          cd data
+          bash update-product-image-urls.sh dev $AWS_REGION
+
+      # Step 3: Load products into DynamoDB
+      - name: Load Products into DynamoDB
+        run: |
+          cd data
+          bash load-products.sh dev $AWS_REGION
 
   # Deploy to Production (manual approval)
   deploy-prod:
@@ -288,6 +342,14 @@ jobs:
         with:
           name: lambda-shipping-processor
           path: terraform/modules/lambda/
+
+      - name: Create tfvars
+        run: |
+          cat > terraform/environments/dev/terraform.auto.tfvars << EOF
+          admin_email = "${{ secrets.ADMIN_EMAIL }}"
+          domain_name = "${{ secrets.DOMAIN_NAME }}"
+          acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
+          EOF
 
       - name: Terraform Init
         run: |

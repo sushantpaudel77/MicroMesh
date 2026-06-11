@@ -43,7 +43,6 @@ module "secrets" {
 
   environment  = var.environment
   project_name = var.project_name
-  db_host      = module.rds.address
   tags         = var.tags
 }
 
@@ -158,7 +157,7 @@ module "sns" {
   environment  = var.environment
   project_name = var.project_name
   topics       = local.sns_topics
-  alarm_email  = var.alarm_email
+  admin_email  = var.admin_email # System alarms
   tags         = var.tags
 }
 
@@ -205,8 +204,12 @@ module "api_gateway" {
 }
 
 # MODULE: WAF
+# CloudFront-scoped WAF MUST be in us-east-1 — use the alias provider
 module "waf" {
   source = "../../modules/waf"
+  providers = {
+    aws = aws.us_east_1
+  }
 
   environment          = var.environment
   project_name         = var.project_name
@@ -216,8 +219,12 @@ module "waf" {
 }
 
 # MODULE: Frontend
+# S3 + CloudFront resources must be in us-east-1
 module "frontend" {
   source = "../../modules/frontend"
+  providers = {
+    aws = aws.us_east_1
+  }
 
   environment         = var.environment
   project_name        = var.project_name
@@ -341,4 +348,18 @@ module "ecr" {
   project_name = var.project_name
   services     = local.services
   tags         = var.tags
+}
+
+# MODULE: Budget
+module "budget" {
+  source = "../../modules/budget"
+
+  environment              = var.environment
+  project_name             = var.project_name
+  budget_amount            = 10
+  notification_email       = var.admin_email 
+  sns_topic_arns           = [module.sns.topic_arns["alarms"]]
+  enable_anomaly_detection = false
+
+  tags = var.tags
 }

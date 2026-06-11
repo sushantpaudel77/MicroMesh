@@ -83,7 +83,7 @@ echo ""
 # ============================================
 echo -e "${YELLOW}📋 Step 3: Scaling down ECS services...${NC}"
 
-CLUSTER="${ENV}-ecommerce-cluster"
+CCLUSTER="ecommerce-cluster-${ENV}"
 SERVICES=$(aws ecs list-services \
     --cluster "$CLUSTER" \
     --region us-east-1 \

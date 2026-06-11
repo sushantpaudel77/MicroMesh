@@ -20,7 +20,11 @@ echo ""
 
 cd "$GLOBAL_DIR"
 
-echo "📦 Initializing Terraform..."
+# State bucket must always be created in us-east-1 (not the CLI default region).
+export AWS_REGION=us-east-1
+export AWS_DEFAULT_REGION=us-east-1
+
+echo "📦 Initializing Terraform (region: us-east-1)..."
 terraform init
 
 echo ""

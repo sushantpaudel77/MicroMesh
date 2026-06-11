@@ -31,7 +31,8 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
         Effect = "Allow"
         Action = ["secretsmanager:GetSecretValue"]
         Resource = [
-          "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:/${var.project_name}/${var.environment}/*"
+          "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:/${var.project_name}/${var.environment}/*",
+          "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:${var.project_name}-${var.environment}-*"
         ]
       },
       {

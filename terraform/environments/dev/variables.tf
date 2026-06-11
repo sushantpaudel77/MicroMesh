@@ -22,14 +22,18 @@ variable "vpc_cidr" {
   default     = "10.10.0.0/16"
 }
 
-variable "alarm_email" {
-  description = "Alarm email"
+variable "admin_email" {
+  description = "Email for admin alerts"
   type        = string
+  default     = "cloudforsushant7@gmail.com"
 }
 
 variable "acm_certificate_arn" {
   description = "ACM Certificate ARN"
   type        = string
+}
+variable "time_period_start" {
+  type = string
 }
 
 variable "waf_enable_rate_limiting" {

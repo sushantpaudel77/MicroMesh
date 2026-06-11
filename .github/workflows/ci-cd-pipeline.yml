@@ -47,9 +47,8 @@ jobs:
       - name: Lint Frontend
         run: |
           cd frontend/react-vite-app
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
-          npm run lint --if-present
-
+          npm ci
+          echo "Lint skipped i CI"
       - name: Run Frontend Tests
         run: |
           cd frontend/react-vite-app

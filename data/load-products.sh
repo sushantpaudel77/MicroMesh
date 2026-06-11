@@ -1,117 +1,102 @@
-#!/bin/bash
+name: CI/CD Pipeline - E-Commerce Platform
 
-# Load products into DynamoDB
-# Usage: ./load-products.sh <environment> <region>
-# Example: ./load-products.sh dev us-east-1
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      action:
+        description: 'Action'
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
 
-set -e
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
-ENV=${1:-dev}
-REGION=${2:-us-east-1}
-PROJECT="ecommerce"
+jobs:
+  # Build & Push
+  build-and-push:
+    name: Build & Push All Images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - product-service
+          - cart-service
+          - user-service
+          - order-service
+          - shipping-service
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Create ECR Repo
+        run: |
+          aws ecr describe-repositories --repository-names ecommerce/${{ matrix.service }} --region $AWS_REGION 2>/dev/null || \
+            aws ecr create-repository --repository-name ecommerce/${{ matrix.service }} --region $AWS_REGION
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: services/${{ matrix.service }}
+          file: services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/ecommerce/${{ matrix.service }}:latest
 
-# ============================================
-# Get table names dynamically
-# ============================================
-TABLE_NAME="${PROJECT}-${ENV}-products"
-CARTS_TABLE="${PROJECT}-${ENV}-cart"
+  # Terraform
+  terraform:
+    name: Terraform ${{ inputs.action }} - ${{ inputs.environment }}
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-# Try to get from SSM first (if Terraform deployed)
-TABLE_NAME_SSM=$(aws ssm get-parameter \
-    --name "/${PROJECT}/${ENV}/dynamodb/products-table" \
-    --region "$REGION" \
-    --query 'Parameter.Value' \
-    --output text 2>/dev/null || echo "")
+      - name: Create tfvars
+        run: |
+          cat > terraform/environments/${{ inputs.environment }}/terraform.auto.tfvars << EOF
+          admin_email = "${{ secrets.ADMIN_EMAIL }}"
+          domain_name = "${{ secrets.DOMAIN_NAME }}"
+          acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
+          environment = "${{ inputs.environment }}"
+          aws_region = "us-east-1"
+          project_name = "ecommerce"
+          time_period_start = "2026-06-01_00:00"
+          EOF
 
-if [ -n "$TABLE_NAME_SSM" ] && [ "$TABLE_NAME_SSM" != "None" ]; then
-    TABLE_NAME="$TABLE_NAME_SSM"
-fi
-
-CARTS_TABLE_SSM=$(aws ssm get-parameter \
-    --name "/${PROJECT}/${ENV}/dynamodb/cart-table" \
-    --region "$REGION" \
-    --query 'Parameter.Value' \
-    --output text 2>/dev/null || echo "")
-
-if [ -n "$CARTS_TABLE_SSM" ] && [ "$CARTS_TABLE_SSM" != "None" ]; then
-    CARTS_TABLE="$CARTS_TABLE_SSM"
-fi
-
-echo "============================================"
-echo "  📦 Load Products into DynamoDB"
-echo "============================================"
-echo "Environment: $ENV"
-echo "Products Table: $TABLE_NAME"
-echo "Carts Table: $CARTS_TABLE"
-echo "Region: $REGION"
-echo ""
-
-# Check if jq is installed
-if ! command -v jq &> /dev/null; then
-    echo "Error: jq is required but not installed."
-    echo "Install with: sudo apt-get install jq (Ubuntu/Debian) or brew install jq (Mac)"
-    exit 1
-fi
-
-# Check if products table exists
-echo "Checking if table $TABLE_NAME exists..."
-if ! aws dynamodb describe-table --table-name "$TABLE_NAME" --region "$REGION" > /dev/null 2>&1; then
-    echo "❌ Table $TABLE_NAME does not exist!"
-    echo "Deploy infrastructure first or create table manually."
-    exit 1
-fi
-echo "✓ Table $TABLE_NAME exists"
-echo ""
-
-# Read products from JSON file
-PRODUCTS_FILE="$(dirname "$0")/products.json"
-
-if [ ! -f "$PRODUCTS_FILE" ]; then
-    echo "Error: products.json not found at $PRODUCTS_FILE"
-    exit 1
-fi
-
-# Count total products
-TOTAL=$(jq length "$PRODUCTS_FILE")
-echo "Found $TOTAL products to load"
-echo ""
-
-# Load each product
-COUNTER=0
-SUCCESS=0
-FAILED=0
-
-jq -c '.[]' "$PRODUCTS_FILE" | while read -r product; do
-    COUNTER=$((COUNTER + 1))
-    
-    PRODUCT_ID=$(echo "$product" | jq -r '.product_id')
-    NAME=$(echo "$product" | jq -r '.name')
-    
-    echo -n "[$COUNTER/$TOTAL] $NAME ($PRODUCT_ID) ... "
-    
-    ITEM=$(echo "$product" | jq '{
-        product_id: {S: .product_id},
-        name: {S: .name},
-        description: {S: .description},
-        price: {N: (.price | tostring)},
-        stock: {N: (.stock | tostring)},
-        category: {S: .category},
-        image_url: {S: .image_url}
-    }')
-    
-    if aws dynamodb put-item \
-        --table-name "$TABLE_NAME" \
-        --item "$ITEM" \
-        --region "$REGION" > /dev/null 2>&1; then
-        echo "✅"
-    else
-        echo "❌"
-    fi
-done
-
-echo ""
-echo "============================================"
-echo "✅ Loading complete!"
-echo "============================================"
-echo ""
-echo "Verify: aws dynamodb scan --table-name $TABLE_NAME --region $REGION --query 'Count'"
+      - name: Terraform ${{ inputs.action }}
+        run: |
+          cd terraform/environments/${{ inputs.environment }}
+          terraform init -reconfigure \
+            -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
+            -backend-config="key=${{ inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=us-east-1"
+          
+          if [ "${{ inputs.action }}" = "destroy" ]; then
+            terraform destroy -auto-approve
+          else
+            terraform apply -auto-approve
+          fi

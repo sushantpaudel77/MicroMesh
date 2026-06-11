@@ -4,7 +4,7 @@ resource "aws_budgets_budget" "monthly" {
   budget_type       = "COST"
   limit_amount      = var.budget_amount
   limit_unit        = "USD"
-  time_period_start = "${var.time_period_start}_00:00"
+  time_period_start = var.time_period_start
   time_unit         = "MONTHLY"
 
   notification {

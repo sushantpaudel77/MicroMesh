@@ -1,7 +1,6 @@
 import redis
 import json
 import os
-from functools import wraps
 
 class RedisCache:
     def __init__(self):
@@ -17,19 +16,19 @@ class RedisCache:
         try:
             data = self.client.get(key)
             return json.loads(data) if data else None
-        except:
+        except Exception:
             return None
     
     def set(self, key, value, ttl=300):
         try:
             self.client.setex(key, ttl, json.dumps(value))
-        except:
+        except Exception:
             pass
     
     def delete(self, key):
         try:
             self.client.delete(key)
-        except:
+        except Exception:
             pass
     
     def delete_pattern(self, pattern):
@@ -37,7 +36,7 @@ class RedisCache:
             keys = self.client.keys(pattern)
             if keys:
                 self.client.delete(*keys)
-        except:
+        except Exception:
             pass
 
 # Singleton instance

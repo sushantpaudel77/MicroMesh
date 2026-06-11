@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional
 from models import User, UserCreate, UserUpdate
 from database import get_db_cursor, init_db
 from cache import cache

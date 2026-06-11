@@ -43,7 +43,6 @@ module "secrets" {
 
   environment  = var.environment
   project_name = var.project_name
-  db_host      = module.rds.address
   tags         = var.tags
 }
 
@@ -158,7 +157,7 @@ module "sns" {
   environment  = var.environment
   project_name = var.project_name
   topics       = local.sns_topics
-  alarm_email  = var.alarm_email
+  admin_email  = var.admin_email # System alarms
   tags         = var.tags
 }
 
@@ -214,7 +213,7 @@ module "waf" {
 
   environment          = var.environment
   project_name         = var.project_name
-  enable_rate_limiting = true
+  enable_rate_limiting = false
   rate_limit           = 200
   tags                 = var.tags
 }
@@ -230,7 +229,7 @@ module "frontend" {
   environment         = var.environment
   project_name        = var.project_name
   domain_name         = var.domain_name
-  subdomain           = "www"
+  subdomain           = "dev"
   acm_certificate_arn = var.acm_certificate_arn
   waf_acl_arn         = module.waf.web_acl_arn
   api_endpoint        = module.api_gateway.api_endpoint
@@ -327,6 +326,21 @@ module "ssm" {
   tags = var.tags
 }
 
+module "route53" {
+  source = "../../modules/route53"
+
+  domain_name               = var.domain_name
+  cloudfront_domain_name    = module.frontend.cloudfront_domain
+  cloudfront_hosted_zone_id = "Z2FDTNDATAQYW2" # CloudFront fixed zone ID
+
+  # Create dev subdomain for dev environment
+  create_dev_record = var.environment == "dev" ? true : false
+
+  depends_on = [module.frontend]
+
+  tags = var.tags
+}
+
 module "ecr" {
   source = "../../modules/ecr"
 
@@ -335,15 +349,17 @@ module "ecr" {
   services     = local.services
   tags         = var.tags
 }
+
+# MODULE: Budget
 module "budget" {
   source = "../../modules/budget"
 
-  environment        = var.environment
-  project_name       = var.project_name
-  budget_amount      = 20  # $20 USD for prod
-  notification_email = var.alarm_email
-  sns_topic_arns     = [module.sns.topic_arns["alarms"]]
-  enable_anomaly_detection = true  # Prod: enable
+  environment              = var.environment
+  project_name             = var.project_name
+  budget_amount            = 10
+  notification_email       = var.admin_email 
+  sns_topic_arns           = [module.sns.topic_arns["alarms"]]
+  enable_anomaly_detection = false
 
   tags = var.tags
 }

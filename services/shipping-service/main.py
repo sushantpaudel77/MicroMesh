@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException, Header, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from models import (
     Shipment, ShipmentCreate, ShipmentStatusUpdate,
-    ShipmentTracking, TrackingEvent
+    ShipmentTracking
 )
 from database import get_shipping_table
 from state_machine import ShipmentStateMachine
@@ -45,7 +45,7 @@ def get_sns_client():
 @app.on_event("startup")
 async def startup_event():
     """Log startup information"""
-    logger.info(f"Starting Shipping Service...")
+    logger.info("Starting Shipping Service...")
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"AWS Region: {settings.aws_region}")
     logger.info(f"Shipping Table: {settings.shipping_table}")

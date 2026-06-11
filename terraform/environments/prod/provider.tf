@@ -12,16 +12,9 @@ terraform {
       version = "~> 3.5"
     }
   }
-
-  backend "s3" {
-    bucket  = "ecommerce-terraform-state-cloudnerd"
-    key     = "prod/terraform.tfstate"
-    region  = "us-east-1"
-    encrypt = true
-  }
 }
 
-# Default provider — all regional resources
+# Default provider — all regional resources (ECS, RDS, ALB, etc.)
 provider "aws" {
   region = var.aws_region
 
@@ -30,7 +23,8 @@ provider "aws" {
   }
 }
 
-# us-east-1 alias — required for CloudFront WAF and frontend S3/CloudFront
+# us-east-1 alias — required for CloudFront WAF (scope = CLOUDFRONT)
+# and the frontend S3 bucket (served via CloudFront)
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"

@@ -2,7 +2,6 @@ import os
 import boto3
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
-from typing import Optional
 
 class Settings(BaseSettings):
     model_config = ConfigDict(frozen=False, env_file=".env")

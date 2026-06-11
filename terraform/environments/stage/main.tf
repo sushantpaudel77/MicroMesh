@@ -43,7 +43,6 @@ module "secrets" {
 
   environment  = var.environment
   project_name = var.project_name
-  db_host      = module.rds.address
   tags         = var.tags
 }
 
@@ -158,7 +157,7 @@ module "sns" {
   environment  = var.environment
   project_name = var.project_name
   topics       = local.sns_topics
-  alarm_email  = var.alarm_email
+  admin_email  = var.admin_email # System alarms
   tags         = var.tags
 }
 
@@ -327,6 +326,21 @@ module "ssm" {
   tags = var.tags
 }
 
+module "route53" {
+  source = "../../modules/route53"
+
+  domain_name               = var.domain_name
+  cloudfront_domain_name    = module.frontend.cloudfront_domain
+  cloudfront_hosted_zone_id = "Z2FDTNDATAQYW2" # CloudFront fixed zone ID
+
+  # Create dev subdomain for dev environment
+  create_dev_record = var.environment == "dev" ? true : false
+
+  depends_on = [module.frontend]
+
+  tags = var.tags
+}
+
 module "ecr" {
   source = "../../modules/ecr"
 
@@ -335,15 +349,17 @@ module "ecr" {
   services     = local.services
   tags         = var.tags
 }
+
+# MODULE: Budget
 module "budget" {
   source = "../../modules/budget"
 
   environment              = var.environment
   project_name             = var.project_name
-  budget_amount            = 10 # $50 USD for prod
-  notification_email       = var.alarm_email
+  budget_amount            = 10
+  notification_email       = var.admin_email 
   sns_topic_arns           = [module.sns.topic_arns["alarms"]]
-  enable_anomaly_detection = true # Prod: enable
+  enable_anomaly_detection = false
 
   tags = var.tags
 }

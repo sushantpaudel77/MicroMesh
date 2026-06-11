@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 from typing import List
-from datetime import datetime
 
 class CartItem(BaseModel):
     product_id: str

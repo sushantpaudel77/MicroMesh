@@ -145,18 +145,21 @@ locals {
         order_id = {
           name           = "order_id-index"
           hash_key       = "order_id"
+          hash_key_type  = "N"
           attribute_type = "N"
         }
 
         tracking = {
           name           = "tracking_number-index"
           hash_key       = "tracking_number"
+          hash_key_type  = "S"
           attribute_type = "S"
         }
 
         user_id = {
           name           = "user_id-index"
           hash_key       = "user_id"
+          hash_key_type  = "S"
           attribute_type = "S"
         }
       }

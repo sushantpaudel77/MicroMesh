@@ -5,7 +5,6 @@ from models import Product, UpdateInventoryRequest
 from database import get_products_table
 from boto3.dynamodb.conditions import Attr
 from config import settings
-import uuid
 import logging
 from cache import cache
 
@@ -24,7 +23,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info(f"Starting Product Service with config:")
+    logger.info("Starting Product Service with config:")
     logger.info(f"  Environment: {settings.environment}")
     logger.info(f"  AWS Region: {settings.aws_region}")
     logger.info(f"  Products Table: {settings.products_table}")

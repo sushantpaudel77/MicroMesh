@@ -132,6 +132,7 @@ jobs:
       - name: Create tfvars
         run: |
           cat > terraform/environments/dev/terraform.auto.tfvars << EOF
+          time_period_start = "2026-06-01_00:00"
           admin_email = "${{ secrets.ADMIN_EMAIL }}"
           domain_name = "${{ secrets.DOMAIN_NAME }}"
           acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
@@ -206,8 +207,8 @@ jobs:
           terraform apply -auto-approve
       - name: Notify Deployment
         run: |
-          echo "✅ Dev environment deployed!"
-          echo "🔗 https://dev.cloudforsushant.xyz"
+          echo "Dev environment deployed!"
+          echo "https://dev.cloudforsushant.xyz"
 
   # Seed Product Data
   seed-data:
@@ -270,7 +271,7 @@ jobs:
           CF_ID=$(cd ../../terraform/environments/dev && terraform output -raw cloudfront_id)
           aws cloudfront create-invalidation --distribution-id "$CF_ID" --paths "/*"
       - name: Notify
-        run: echo "✅ Frontend deployed!"
+        run: echo "Frontend deployed!"
 
   # Deploy to Production (manual approval)
   deploy-prod:

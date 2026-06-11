@@ -42,15 +42,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install Dependencies
+          cache: 'npm'
+          cache-dependency-path: './frontend/react-vite-app/package-lock.json'
+      - name: Lint Frontend
         run: |
           cd frontend/react-vite-app
-          npm ci
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm run lint --if-present
 
-      - name: Build Frontend
+      - name: Run Frontend Tests
         run: |
           cd frontend/react-vite-app
-          npm run build
+          npm test -- --passWithNoTests
 
   # Build & Push Microservices to ECR
   build-services:
@@ -138,7 +141,7 @@ jobs:
       - name: Install Dependencies
         run: |
           cd frontend/react-vite-app
-          npm ci
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
       - name: Build Frontend
         run: |

@@ -1,19 +1,16 @@
 #!/bin/bash
-
 # Update product image URLs with CloudFront domain
-# Usage: ./update-product-image-urls.sh <environment> <region>
 
 ENV=${1:-dev}
 REGION=${2:-us-east-1}
 
-# Get CloudFront domain
-CF_DOMAIN=$(aws ssm get-parameter \
-    --name "/ecommerce/${ENV}/frontend-url" \
-    --region "$REGION" \
-    --query 'Parameter.Value' \
-    --output text 2>/dev/null | sed 's|https://||' || echo "")
+# Get CloudFront domain (not Route53!)
+CF_DOMAIN=$(aws cloudfront list-distributions \
+    --region us-east-1 \
+    --query "DistributionList.Items[?contains(Origins.Items[0].DomainName, 'ecommerce-frontend-${ENV}')].DomainName" \
+    --output text 2>/dev/null)
 
-if [ -z "$CF_DOMAIN" ]; then
+if [ -z "$CF_DOMAIN" ] || [ "$CF_DOMAIN" = "None" ]; then
     echo "❌ Could not get CloudFront domain!"
     exit 1
 fi
@@ -33,4 +30,4 @@ with open('products.json', 'w') as f:
     json.dump(products, f, indent=2)
 "
 
-echo "✅ Product image URLs updated!"
+echo "✅ Product image URLs updated to use CloudFront!"

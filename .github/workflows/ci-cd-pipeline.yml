@@ -9,6 +9,8 @@ on:
       - 'lambda/**'
       - 'terraform/**'
       - 'data/**'
+      - '.github/**'
+
   pull_request:
     branches: [main]
 

@@ -1,0 +1,36 @@
+# Terraform State Files
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Terraform Working Directory
+.terraform/
+.terraform.lock.hcl
+
+# Variable Files (may contain secrets)
+*.tfvars
+*.tfvars.json
+
+# Keep example files for reference
+!*.tfvars.example
+
+# Crash & Debug Logs
+crash.log
+crash.*.log
+*.tfplan
+*.tfplan.json
+
+# Sensitive / Generated Files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Provider plugin cache
+.terraform.d/
+
+# Terragrunt cache
+.terragrunt-cache/
+
+# CDK for Terraform
+cdktf.out/

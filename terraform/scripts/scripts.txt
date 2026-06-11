@@ -1,0 +1,20 @@
+# Make all scripts executable
+chmod +x scripts/*.sh
+
+# From terraform directory:
+cd /home/sushant/Desktop/my_folder/playground/MicroMesh/terraform
+
+# Initialize backend (one time)
+./scripts/init-backend.sh
+
+# Build and push Docker images
+./scripts/build-push.sh
+
+# Deploy dev
+./scripts/deploy.sh dev
+
+# Check status
+./scripts/check-status.sh dev
+
+# Destroy
+./scripts/destroy.sh dev

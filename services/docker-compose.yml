@@ -1,0 +1,168 @@
+services:
+  # ==================== Infrastructure ====================
+  postgres:
+    image: postgres:15-alpine
+    container_name: ecommerce-postgres
+    environment:
+      POSTGRES_DB: ecommercedb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: ecommerce-localstack
+    environment:
+      - SERVICES=sns,sqs,dynamodb,ssm
+      - DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DATA_DIR=/tmp/localstack/data
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/tmp/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./localstack-init.sh:/etc/localstack/init/ready.d/init.sh
+    networks:
+      - ecommerce-network
+
+  # ==================== Microservices ====================
+  product-service:
+    build:
+      context: ./services/product-service
+      dockerfile: Dockerfile
+      cache_from:
+        - ecommerce-product-service:latest
+    image: ecommerce-product-service:latest
+    container_name: product-service
+    environment:
+      - ENVIRONMENT=local
+      - AWS_REGION=us-east-1
+    env_file:
+      - ./services/product-service/.env
+    ports:
+      - "8001:8001"
+    depends_on:
+      localstack:
+        condition: service_started
+    networks:
+      - ecommerce-network
+    restart: unless-stopped
+
+  cart-service:
+    build:
+      context: ./services/cart-service
+      dockerfile: Dockerfile
+      cache_from:
+        - ecommerce-cart-service:latest
+    image: ecommerce-cart-service:latest
+    container_name: cart-service
+    environment:
+      - ENVIRONMENT=local
+      - AWS_REGION=us-east-1
+    env_file:
+      - ./services/cart-service/.env
+    ports:
+      - "8002:8002"
+    depends_on:
+      localstack:
+        condition: service_started
+    networks:
+      - ecommerce-network
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+      cache_from:
+        - ecommerce-user-service:latest
+    image: ecommerce-user-service:latest
+    container_name: user-service
+    environment:
+      - ENVIRONMENT=local
+      - AWS_REGION=us-east-1
+    env_file:
+      - ./services/user-service/.env
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+    restart: unless-stopped
+
+  order-service:
+    build:
+      context: ./services/order-service
+      dockerfile: Dockerfile
+      cache_from:
+        - ecommerce-order-service:latest
+    image: ecommerce-order-service:latest
+    container_name: order-service
+    environment:
+      - ENVIRONMENT=local
+      - AWS_REGION=us-east-1
+    env_file:
+      - ./services/order-service/.env
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+      product-service:
+        condition: service_started
+      cart-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+    networks:
+      - ecommerce-network
+    restart: unless-stopped
+
+  shipping-service:
+    build:
+      context: ./services/shipping-service
+      dockerfile: Dockerfile
+      cache_from:
+        - ecommerce-shipping-service:latest
+    image: ecommerce-shipping-service:latest
+    container_name: shipping-service
+    environment:
+      - ENVIRONMENT=local
+      - AWS_REGION=us-east-1
+    env_file:
+      - ./services/shipping-service/.env
+    ports:
+      - "8005:8005"
+    depends_on:
+      localstack:
+        condition: service_started
+    networks:
+      - ecommerce-network
+    restart: unless-stopped
+
+networks:
+  ecommerce-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  localstack_data:
+    driver: local

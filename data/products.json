@@ -1,0 +1,182 @@
+[
+  {
+    "product_id": "prod-001",
+    "name": "Premium White Oxford Shirt",
+    "description": "Tailored oxford cotton shirt with button-down collar and modern fit",
+    "price": 54.99,
+    "stock": 150,
+    "category": "Tops",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-001.jpg"
+  },
+  {
+    "product_id": "prod-002",
+    "name": "Modern Slim Chino Pants",
+    "description": "Contemporary slim-fit chinos crafted from stretch cotton twill",
+    "price": 64.99,
+    "stock": 85,
+    "category": "Bottoms",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-002.jpg"
+  },
+  {
+    "product_id": "prod-003",
+    "name": "Printed Summer Midi Dress",
+    "description": "Lightweight floral midi dress with flowing silhouette and adjustable straps",
+    "price": 74.99,
+    "stock": 200,
+    "category": "Dresses",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-003.jpg"
+  },
+  {
+    "product_id": "prod-004",
+    "name": "Leather Biker Jacket",
+    "description": "Genuine leather jacket with asymmetric zip and quilted shoulders",
+    "price": 189.99,
+    "stock": 120,
+    "category": "Outerwear",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-004.jpg"
+  },
+  {
+    "product_id": "prod-005",
+    "name": "High-Waist Skinny Jeans",
+    "description": "Stretch denim jeans with high waist and skinny leg cut",
+    "price": 54.99,
+    "stock": 250,
+    "category": "Bottoms",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-005.jpg"
+  },
+  {
+    "product_id": "prod-006",
+    "name": "Oversized Graphic Tee",
+    "description": "100% cotton oversized t-shirt with vintage-style graphic print",
+    "price": 29.99,
+    "stock": 300,
+    "category": "Tops",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-006.jpg"
+  },
+  {
+    "product_id": "prod-007",
+    "name": "Knit Turtleneck Sweater",
+    "description": "Ribbed merino wool turtleneck sweater for cold weather layering",
+    "price": 79.99,
+    "stock": 180,
+    "category": "Tops",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-007.jpg"
+  },
+  {
+    "product_id": "prod-008",
+    "name": "Pleated Midi Skirt",
+    "description": "Satin pleated midi skirt with elastic waistband and elegant drape",
+    "price": 44.99,
+    "stock": 220,
+    "category": "Bottoms",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-008.jpg"
+  },
+  {
+    "product_id": "prod-009",
+    "name": "Puffer Quilted Vest",
+    "description": "Lightweight quilted vest with zip pockets and down fill insulation",
+    "price": 64.99,
+    "stock": 400,
+    "category": "Outerwear",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-009.jpg"
+  },
+  {
+    "product_id": "prod-010",
+    "name": "Relaxed Linen Trousers",
+    "description": "Breathable linen blend trousers with wide-leg cut and relaxed fit",
+    "price": 69.99,
+    "stock": 175,
+    "category": "Bottoms",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-010.jpg"
+  },
+  {
+    "product_id": "prod-011",
+    "name": "Denim Trucker Jacket",
+    "description": "Classic denim jacket with chest pockets and button-front closure",
+    "price": 89.99,
+    "stock": 95,
+    "category": "Outerwear",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-011.jpg"
+  },
+  {
+    "product_id": "prod-012",
+    "name": "Wrap Blouse",
+    "description": "Silky wrap blouse with V-neck and adjustable tie waist",
+    "price": 39.99,
+    "stock": 280,
+    "category": "Tops",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-012.jpg"
+  },
+  {
+    "product_id": "prod-013",
+    "name": "Athletic Jogger Pants",
+    "description": "Moisture-wicking joggers with tapered fit and drawstring waist",
+    "price": 44.99,
+    "stock": 160,
+    "category": "Activewear",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-013.jpg"
+  },
+  {
+    "product_id": "prod-014",
+    "name": "Wool Blend Blazer",
+    "description": "Single-breasted blazer in a wool-blend fabric with notch lapels",
+    "price": 129.99,
+    "stock": 140,
+    "category": "Outerwear",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-014.jpg"
+  },
+  {
+    "product_id": "prod-015",
+    "name": "Ribbed Crop Top",
+    "description": "Fitted ribbed cotton crop top with round neck and short sleeves",
+    "price": 24.99,
+    "stock": 350,
+    "category": "Tops",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-015.jpg"
+  },
+  {
+    "product_id": "prod-016",
+    "name": "Maxi Boho Dress",
+    "description": "Flowy maxi dress with embroidered neckline and tiered skirt",
+    "price": 84.99,
+    "stock": 65,
+    "category": "Dresses",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-016.jpg"
+  },
+  {
+    "product_id": "prod-017",
+    "name": "Utility Cargo Shorts",
+    "description": "Casual cargo shorts with utility pockets and comfortable everyday fit",
+    "price": 42.99,
+    "stock": 190,
+    "category": "Bottoms",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-017.jpg"
+  },
+  {
+    "product_id": "prod-018",
+    "name": "Sports Bra",
+    "description": "High-impact sports bra with racerback design and compression fit",
+    "price": 34.99,
+    "stock": 210,
+    "category": "Activewear",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-018.jpg"
+  },
+  {
+    "product_id": "prod-019",
+    "name": "Trench Coat",
+    "description": "Classic double-breasted trench coat with belted waist and storm flap",
+    "price": 149.99,
+    "stock": 500,
+    "category": "Outerwear",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-019.jpg"
+  },
+  {
+    "product_id": "prod-020",
+    "name": "Premium Zip Hoodie",
+    "description": "Soft fleece-lined hoodie with full-length zipper and adjustable hood",
+    "price": 54.99,
+    "stock": 600,
+    "category": "Tops",
+    "image_url": "https://d276cem6ccshsm.cloudfront.net/images/products/prod-020.jpg"
+  }
+]

@@ -1,0 +1,4 @@
+# Lambda packaging
+*.zip
+__pycache__/
+*.pyc

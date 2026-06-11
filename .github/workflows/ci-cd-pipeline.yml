@@ -1,0 +1,310 @@
+name: CI/CD Pipeline - E-Commerce Platform
+
+on:
+  push:
+    branches: [main, feature]
+    paths:
+      - 'services/**'
+      - 'frontend/**'
+      - 'lambda/**'
+      - 'terraform/**'
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
+jobs:
+  # Code Quality Checks
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Lint Python Services
+        run: |
+          pip install ruff
+          ruff check services/
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/react-vite-app/package-lock.json
+
+      - name: Lint Frontend
+        run: |
+          cd frontend/react-vite-app
+          npm ci
+          npm run lint --if-present
+
+      - name: Run Frontend Tests
+        run: |
+          cd frontend/react-vite-app
+          npm test -- --passWithNoTests
+
+  # Build & Push Microservices to ECR
+  build-services:
+    name: Build & Push Services
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - product-service
+          - cart-service
+          - user-service
+          - order-service
+          - shipping-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-${{ matrix.service }}
+          key: ${{ runner.os }}-buildx-${{ matrix.service }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-${{ matrix.service }}-
+
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: services/${{ matrix.service }}
+          file: services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/ecommerce/${{ matrix.service }}:latest
+            ${{ env.ECR_REGISTRY }}/ecommerce/${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=local,src=/tmp/.buildx-cache-${{ matrix.service }}
+          cache-to: type=local,dest=/tmp/.buildx-cache-${{ matrix.service }}-new,mode=max
+
+  # Package Lambda
+  build-lambda:
+    name: Build Lambda Package
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package Lambda Function
+        run: |
+          cd lambda/order-shipment-processor
+          zip -r ../../shipping-processor.zip lambda_function.py
+          echo "Lambda package created"
+
+      - name: Upload Lambda Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-shipping-processor
+          path: shipping-processor.zip
+          retention-days: 7
+
+  # Build & Deploy Frontend
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/react-vite-app/package-lock.json
+
+      - name: Build Frontend
+        run: |
+          cd frontend/react-vite-app
+          npm ci
+          npm run build
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync frontend/react-vite-app/dist/ s3://ecommerce-frontend-dev/ --delete --exclude "images/*"
+
+      - name: Invalidate CloudFront Cache
+        run: |
+          CF_DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Aliases.Items[0]=='dev.cloudforsushant.xyz'].Id" --output text)
+          if [ -n "$CF_DIST_ID" ]; then
+            aws cloudfront create-invalidation --distribution-id "$CF_DIST_ID" --paths "/*"
+            echo "CloudFront cache invalidated"
+          fi
+
+  # Terraform Plan (PR only)
+  terraform-plan:
+    name: Terraform Plan
+    if: github.event_name == 'pull_request'
+    needs: [build-services, build-lambda]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [dev]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.7'
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Download Lambda Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-shipping-processor
+          path: terraform/modules/lambda/
+
+      - name: Terraform Init
+        run: |
+          cd terraform/environments/${{ matrix.environment }}
+          terraform init -backend-config="key=${{ matrix.environment }}/terraform.tfstate"
+
+      - name: Terraform Validate
+        run: |
+          cd terraform/environments/${{ matrix.environment }}
+          terraform validate
+
+      - name: Terraform Plan
+        run: |
+          cd terraform/environments/${{ matrix.environment }}
+          terraform plan -var-file="terraform.tfvars" -out=tfplan
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ matrix.environment }}
+          path: terraform/environments/${{ matrix.environment }}/tfplan
+
+  # Terraform Apply (on merge to main)
+  terraform-apply:
+    name: Terraform Apply - Dev
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [build-services, build-lambda, deploy-frontend]
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://dev.cloudforsushant.xyz
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.7'
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Download Lambda Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-shipping-processor
+          path: terraform/modules/lambda/
+
+      - name: Terraform Init
+        run: |
+          cd terraform/environments/dev
+          terraform init -backend-config="key=dev/terraform.tfstate"
+
+      - name: Terraform Apply
+        run: |
+          cd terraform/environments/dev
+          terraform apply -var-file="terraform.tfvars" -auto-approve
+
+      - name: Notify Deployment
+        run: |
+          echo "Dev environment deployed successfully!"
+          echo "https://dev.cloudforsushant.xyz"
+
+  # Deploy to Production (manual approval)
+  deploy-prod:
+    name: Deploy to Production
+    if: github.ref == 'refs/heads/main'
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+      url: https://cloudforsushant.xyz
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.7'
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Download Lambda Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-shipping-processor
+          path: terraform/modules/lambda/
+
+      - name: Terraform Init
+        run: |
+          cd terraform/environments/prod
+          terraform init -backend-config="key=prod/terraform.tfstate"
+
+      - name: Terraform Plan
+        run: |
+          cd terraform/environments/prod
+          terraform plan -var-file="terraform.tfvars" -out=tfplan
+
+      - name: Terraform Apply
+        run: |
+          cd terraform/environments/prod
+          terraform apply -var-file="terraform.tfvars" -auto-approve
+
+      - name: Notify Production Deployment
+        run: |
+          echo "Production deployed successfully!"
+          echo "https://cloudforsushant.xyz"

@@ -1,0 +1,29 @@
+# AWS
+aws_region  = "us-east-1"
+environment = "dev"
+
+# Project
+project_name = "ecommerce"
+
+# Domain
+domain_name = "example.com"
+
+# ACM Certificate (replace with your own)
+acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/example-certificate-id"
+
+# Networking
+vpc_cidr = "10.10.0.0/16"
+
+# Alerts
+alarm_email = "alerts@example.com"
+
+# WAF
+waf_enable_rate_limiting = false
+waf_rate_limit           = 100
+
+# Tags
+tags = {
+  Environment = "dev"
+  Project     = "ecommerce"
+  ManagedBy   = "terraform"
+}

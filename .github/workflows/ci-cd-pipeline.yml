@@ -136,13 +136,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/react-vite-app/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          cd frontend/react-vite-app
+          npm ci
 
       - name: Build Frontend
         run: |
           cd frontend/react-vite-app
-          npm ci
           npm run build
 
       - name: Configure AWS Credentials
@@ -154,20 +156,16 @@ jobs:
 
       - name: Deploy to S3
         run: |
-          # Get bucket from Terraform output or SSM
-           BUCKET=$(aws ssm get-parameter --name "/ecommerce/dev/frontend-url" --region $AWS_REGION --query 'Parameter.Value' --output text 2>/dev/null || echo "")
-            if [ -z "$BUCKET" ]; then
+          cd frontend/react-vite-app
           BUCKET=$(aws s3 ls | grep ecommerce-frontend-dev | awk '{print $3}')
-          fi
-          aws s3 sync frontend/react-vite-app/dist/ "s3://${BUCKET}/" --delete
+          aws s3 sync dist/ "s3://${BUCKET}/" --delete
+
       - name: Invalidate CloudFront Cache
         run: |
           CF_DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Aliases.Items[0]=='dev.cloudforsushant.xyz'].Id" --output text)
           if [ -n "$CF_DIST_ID" ]; then
             aws cloudfront create-invalidation --distribution-id "$CF_DIST_ID" --paths "/*"
-            echo "CloudFront cache invalidated"
           fi
-
   # Terraform Plan (PR only)
   terraform-plan:
     name: Terraform Plan

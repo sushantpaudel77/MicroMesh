@@ -250,12 +250,17 @@ jobs:
           name: lambda-shipping-processor
           path: terraform/modules/lambda/
 
+      # 👇 ADD HERE - Before Terraform Init
       - name: Create tfvars
         run: |
           cat > terraform/environments/dev/terraform.auto.tfvars << EOF
           admin_email = "${{ secrets.ADMIN_EMAIL }}"
           domain_name = "${{ secrets.DOMAIN_NAME }}"
           acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
+          environment = "dev"
+          aws_region = "us-east-1"
+          project_name = "ecommerce"
+          time_period_start = "2026-06-01_00:00"
           EOF
 
       - name: Terraform Init
@@ -272,7 +277,6 @@ jobs:
         run: |
           echo "Dev environment deployed successfully!"
           echo "https://dev.cloudforsushant.xyz"
-
   seed-data:
     name: Seed Product Data
     needs: terraform-apply

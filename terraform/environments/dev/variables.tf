@@ -33,9 +33,10 @@ variable "acm_certificate_arn" {
   type        = string
 }
 variable "time_period_start" {
-  type = string
+  description = "Start date for budget"
+  type        = string
+  default     = "2026-06-01_00:00"  
 }
-
 variable "waf_enable_rate_limiting" {
   description = "Enable WAF rate limiting"
   type        = bool

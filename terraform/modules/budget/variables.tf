@@ -22,8 +22,9 @@ variable "sns_topic_arns" {
 }
 
 variable "time_period_start" {
-  type    = string
-  default = "2026-06-01"
+  description = "Start date for budget"
+  type        = string
+  default     = "2026-06-01_00:00"  
 }
 
 variable "warning_threshold" {

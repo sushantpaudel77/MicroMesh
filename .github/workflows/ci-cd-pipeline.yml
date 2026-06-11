@@ -250,23 +250,26 @@ jobs:
           name: lambda-shipping-processor
           path: terraform/modules/lambda/
 
-      # 👇 ADD HERE - Before Terraform Init
       - name: Create tfvars
         run: |
           cat > terraform/environments/dev/terraform.auto.tfvars << EOF
           admin_email = "${{ secrets.ADMIN_EMAIL }}"
           domain_name = "${{ secrets.DOMAIN_NAME }}"
           acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
-          environment = "dev"
-          aws_region = "us-east-1"
-          project_name = "ecommerce"
-          time_period_start = "2026-06-01_00:00"
           EOF
 
       - name: Terraform Init
         run: |
           cd terraform/environments/dev
-          terraform init -backend-config="key=dev/terraform.tfstate"
+          echo "=== AWS Identity ==="
+          aws sts get-caller-identity
+          echo "=== Backend Bucket ==="
+          aws s3 ls s3://ecommerce-terraform-state-cloudnerd/dev/ --region us-east-1 || echo "No state files yet"
+          echo "=== Terraform Init ==="
+          terraform init -reconfigure \
+            -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
+            -backend-config="key=dev/terraform.tfstate" \
+            -backend-config="region=us-east-1"
 
       - name: Terraform Apply
         run: |
@@ -277,6 +280,7 @@ jobs:
         run: |
           echo "Dev environment deployed successfully!"
           echo "https://dev.cloudforsushant.xyz"
+
   seed-data:
     name: Seed Product Data
     needs: terraform-apply
@@ -353,7 +357,15 @@ jobs:
       - name: Terraform Init
         run: |
           cd terraform/environments/prod
-          terraform init -backend-config="key=prod/terraform.tfstate"
+          echo "=== AWS Identity ==="
+          aws sts get-caller-identity
+          echo "=== Backend Bucket ==="
+          aws s3 ls s3://ecommerce-terraform-state-cloudnerd/dev/ --region us-east-1 || echo "No state files yet"
+          echo "=== Terraform Init ==="
+          terraform init -reconfigure \
+            -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
+            -backend-config="key=dev/terraform.tfstate" \
+            -backend-config="region=us-east-1"
 
       - name: Terraform Plan
         run: |

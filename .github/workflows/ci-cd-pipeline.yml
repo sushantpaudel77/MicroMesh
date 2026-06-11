@@ -223,7 +223,7 @@ jobs:
   # Terraform Apply (on merge to main)
   terraform-apply:
     name: Terraform Apply - Dev
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push'
     needs: [build-services, build-lambda]
     runs-on: ubuntu-latest
     environment:

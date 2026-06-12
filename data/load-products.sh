@@ -1,102 +1,48 @@
-name: CI/CD Pipeline - E-Commerce Platform
+#!/bin/bash
+set -e
 
-on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy'
-        required: true
-        type: choice
-        options:
-          - dev
-          - prod
-      action:
-        description: 'Action'
-        required: true
-        type: choice
-        options:
-          - apply
-          - destroy
+ENV=${1:-dev}
+REGION=${2:-us-east-1}
+PROJECT="ecommerce"
+TABLE_NAME="${PROJECT}-${ENV}-products"
 
-env:
-  AWS_REGION: us-east-1
-  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+echo "Loading products into $TABLE_NAME..."
 
-jobs:
-  # Build & Push
-  build-and-push:
-    name: Build & Push All Images
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service:
-          - product-service
-          - cart-service
-          - user-service
-          - order-service
-          - shipping-service
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-      - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Create ECR Repo
-        run: |
-          aws ecr describe-repositories --repository-names ecommerce/${{ matrix.service }} --region $AWS_REGION 2>/dev/null || \
-            aws ecr create-repository --repository-name ecommerce/${{ matrix.service }} --region $AWS_REGION
-      - name: Build and Push
-        uses: docker/build-push-action@v5
-        with:
-          context: services/${{ matrix.service }}
-          file: services/${{ matrix.service }}/Dockerfile
-          push: true
-          tags: ${{ env.ECR_REGISTRY }}/ecommerce/${{ matrix.service }}:latest
+if ! command -v jq &> /dev/null; then
+    echo "Installing jq..."
+    sudo apt-get install -y jq
+fi
 
-  # Terraform
-  terraform:
-    name: Terraform ${{ inputs.action }} - ${{ inputs.environment }}
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    environment:
-      name: ${{ inputs.environment }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+PRODUCTS_FILE="$(dirname "$0")/products.json"
 
-      - name: Create tfvars
-        run: |
-          cat > terraform/environments/${{ inputs.environment }}/terraform.auto.tfvars << EOF
-          admin_email = "${{ secrets.ADMIN_EMAIL }}"
-          domain_name = "${{ secrets.DOMAIN_NAME }}"
-          acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
-          environment = "${{ inputs.environment }}"
-          aws_region = "us-east-1"
-          project_name = "ecommerce"
-          time_period_start = "2026-06-01_00:00"
-          EOF
+if [ ! -f "$PRODUCTS_FILE" ]; then
+    echo "Error: products.json not found"
+    exit 1
+fi
 
-      - name: Terraform ${{ inputs.action }}
-        run: |
-          cd terraform/environments/${{ inputs.environment }}
-          terraform init -reconfigure \
-            -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
-            -backend-config="key=${{ inputs.environment }}/terraform.tfstate" \
-            -backend-config="region=us-east-1"
-          
-          if [ "${{ inputs.action }}" = "destroy" ]; then
-            terraform destroy -auto-approve
-          else
-            terraform apply -auto-approve
-          fi
+TOTAL=$(jq length "$PRODUCTS_FILE")
+echo "Loading $TOTAL products..."
+
+jq -c '.[]' "$PRODUCTS_FILE" | while read -r product; do
+    PRODUCT_ID=$(echo "$product" | jq -r '.product_id')
+    NAME=$(echo "$product" | jq -r '.name')
+    
+    ITEM=$(echo "$product" | jq '{
+        product_id: {S: .product_id},
+        name: {S: .name},
+        description: {S: .description},
+        price: {N: (.price | tostring)},
+        stock: {N: (.stock | tostring)},
+        category: {S: .category},
+        image_url: {S: .image_url}
+    }')
+    
+    aws dynamodb put-item \
+        --table-name "$TABLE_NAME" \
+        --item "$ITEM" \
+        --region "$REGION" > /dev/null 2>&1
+    
+    echo "  ✅ $NAME"
+done
+
+echo "✅ Done!"

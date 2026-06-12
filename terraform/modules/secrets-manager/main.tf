@@ -16,6 +16,7 @@ resource "aws_secretsmanager_secret_version" "db" {
   secret_string = jsonencode({
     username = "postgres"
     password = random_password.db.result
+    host     = var.db_host
     engine   = "postgres"
     port     = 5432
     dbname   = "ecommercedb"

@@ -116,7 +116,7 @@ jobs:
             -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
             -backend-config="key=${{ inputs.environment }}/terraform.tfstate" \
             -backend-config="region=us-east-1"
-          
+
           if [ "${{ inputs.action }}" = "destroy" ]; then
             terraform destroy -auto-approve
           else
@@ -143,6 +143,21 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Create Frontend .env
+        run: |
+          USER_POOL_ID=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/cognito/user-pool-id" --region $AWS_REGION --query 'Parameter.Value' --output text)
+          CLIENT_ID=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/cognito/client-id" --region $AWS_REGION --query 'Parameter.Value' --output text)
+          API_URL=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/api-url" --region $AWS_REGION --query 'Parameter.Value' --output text)
+
+          cat > frontend/react-vite-app/.env << EOF
+          VITE_COGNITO_USER_POOL_ID=${USER_POOL_ID}
+          VITE_COGNITO_USER_POOL_CLIENT_ID=${CLIENT_ID}
+          VITE_API_BASE_URL=${API_URL}
+          EOF
+
+          echo ".env created!"
+
       - name: Build Frontend
         run: |
           cd frontend/react-vite-app

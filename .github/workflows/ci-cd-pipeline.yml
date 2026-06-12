@@ -15,17 +15,18 @@ on:
         required: true
         type: choice
         options:
-          - apply
+          - deploy-all
           - destroy
+          - build-only
 
 env:
   AWS_REGION: us-east-1
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
 jobs:
-  # Build & Push (Always runs)
+  # Build & Push Docker Images
   build-and-push:
-    name: Build & Push All
+    name: Build & Push Images
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -57,10 +58,28 @@ jobs:
           push: true
           tags: ${{ env.ECR_REGISTRY }}/ecommerce/${{ matrix.service }}:latest
 
-  # Terraform (Manual Trigger)
+  # Package Lambda
+  package-lambda:
+    name: Package Lambda
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package
+        run: |
+          cd lambda/order-shipment-processor
+          zip -r ../../shipping-processor.zip lambda_function.py
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-zip
+          path: shipping-processor.zip
+          retention-days: 1
+
+  # Terraform Infrastructure
   terraform:
-    name: Terraform ${{ inputs.action }} - ${{ inputs.environment }}
-    needs: build-and-push
+    name: Terraform - ${{ inputs.environment }}
+    needs: [build-and-push, package-lambda]
+    if: inputs.action != 'build-only'
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.environment }}
@@ -74,7 +93,11 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-
+      - name: Download Lambda
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-zip
+          path: terraform/modules/lambda/
       - name: Create tfvars
         run: |
           cat > terraform/environments/${{ inputs.environment }}/terraform.auto.tfvars << EOF
@@ -86,8 +109,7 @@ jobs:
           project_name = "ecommerce"
           time_period_start = "2026-06-01_00:00"
           EOF
-
-      - name: Terraform ${{ inputs.action }}
+      - name: Terraform ${{ inputs.action == 'destroy' && 'Destroy' || 'Apply' }}
         run: |
           cd terraform/environments/${{ inputs.environment }}
           terraform init -reconfigure \
@@ -100,3 +122,67 @@ jobs:
           else
             terraform apply -auto-approve
           fi
+
+  # Deploy Frontend
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: terraform
+    if: inputs.action == 'deploy-all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Build Frontend
+        run: |
+          cd frontend/react-vite-app
+          npm ci
+          npm run build
+      - name: Deploy to S3
+        run: |
+          cd terraform/environments/${{ inputs.environment }}
+          terraform init -reconfigure -backend-config="key=${{ inputs.environment }}/terraform.tfstate" > /dev/null 2>&1
+          BUCKET=$(terraform output -raw frontend_bucket)
+          CF_ID=$(terraform output -raw cloudfront_id)
+          cd ../../../frontend/react-vite-app
+          aws s3 sync dist/ "s3://${BUCKET}/" --delete
+          aws cloudfront create-invalidation --distribution-id "$CF_ID" --paths "/*"
+
+  # Seed Product Data
+  seed-data:
+    name: Seed Product Data
+    needs: terraform
+    if: inputs.action == 'deploy-all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Install jq
+        run: sudo apt-get install -y jq
+      - name: Upload Images to S3
+        run: |
+          cd data
+          bash upload-images-to-s3.sh ${{ inputs.environment }} $AWS_REGION
+      - name: Update Image URLs
+        run: |
+          cd data
+          bash update-product-image-urls.sh ${{ inputs.environment }} $AWS_REGION
+      - name: Load Products into DynamoDB
+        run: |
+          cd data
+          bash load-products.sh ${{ inputs.environment }} $AWS_REGION

@@ -6,7 +6,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
-
     random = {
       source  = "hashicorp/random"
       version = "~> 3.5"
@@ -17,10 +16,15 @@ terraform {
 # Default provider — all regional resources (ECS, RDS, ALB, etc.)
 provider "aws" {
   region = var.aws_region
-
   default_tags {
     tags = var.tags
   }
 }
 
-# us-east-
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+  default_tags {
+    tags = var.tags
+  }
+}

@@ -21,11 +21,12 @@ on:
           - build-only
 
 env:
+  # FIX #4: Use consistent region from env var, not secrets.AWS_REGION
   AWS_REGION: us-east-1
-  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
 
 jobs:
-  # Build & Push (Skip on destroy)
+  # Build & Push (Skip on destroy and build-only is handled inside matrix)
   build-and-push:
     name: Build & Push Images
     if: inputs.action != 'destroy'
@@ -40,18 +41,26 @@ jobs:
           - shipping-service
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
-      - name: Create ECR Repo
+
+      - name: Create ECR Repo if not exists
         run: |
-          aws ecr describe-repositories --repository-names ecommerce/${{ matrix.service }} --region $AWS_REGION 2>/dev/null || \
-            aws ecr create-repository --repository-name ecommerce/${{ matrix.service }} --region $AWS_REGION
+          aws ecr describe-repositories \
+            --repository-names ecommerce/${{ matrix.service }} \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || \
+          aws ecr create-repository \
+            --repository-name ecommerce/${{ matrix.service }} \
+            --region ${{ env.AWS_REGION }}
+
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
@@ -67,11 +76,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Package
+
+      - name: Package Lambda
         run: |
           cd lambda/order-shipment-processor
           zip -r ../../shipping-processor.zip lambda_function.py
-      - name: Upload Artifact
+
+      - name: Upload Lambda Artifact
         uses: actions/upload-artifact@v4
         with:
           name: lambda-zip
@@ -82,65 +93,122 @@ jobs:
   terraform:
     name: Terraform - ${{ inputs.environment }}
     needs: [build-and-push, package-lambda]
-    if: inputs.action != 'build-only'
+    # FIX #1: Use always() so this job runs even when upstream jobs are skipped (e.g. on destroy)
+    if: always() && inputs.action != 'build-only'
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # Download Lambda (skip on destroy)
-      - name: Download Lambda
+      # Download Lambda artifact (skip on destroy)
+      - name: Download Lambda Artifact
         if: inputs.action != 'destroy'
         uses: actions/download-artifact@v4
         with:
           name: lambda-zip
           path: terraform/modules/lambda/
 
-      - name: Empty S3 Bucket
+      # FIX #2: Properly empty S3 before destroy with visible error output
+      - name: Empty S3 Bucket Before Destroy
         if: inputs.action == 'destroy'
         run: |
           cd terraform/environments/${{ inputs.environment }}
-          terraform init -reconfigure -backend-config="key=${{ inputs.environment }}/terraform.tfstate" > /dev/null 2>&1
-          BUCKET=$(terraform output -raw frontend_bucket 2>/dev/null || echo "")
-          if [ -n "$BUCKET" ] && [ "$BUCKET" != "None" ]; then
-            echo "Emptying: $BUCKET"
-            aws s3 rm "s3://${BUCKET}" --recursive --region $AWS_REGION || true
+
+          echo "Initializing Terraform to read state..."
+          terraform init -reconfigure \
+            -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
+            -backend-config="key=${{ inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}"
+
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Terraform init failed. Cannot read state to find S3 bucket."
+            exit 1
           fi
 
+          BUCKET=$(terraform output -raw frontend_bucket 2>/dev/null || echo "")
+          if [ -n "$BUCKET" ] && [ "$BUCKET" != "None" ]; then
+            echo "Emptying S3 bucket: $BUCKET"
+            aws s3 rm "s3://${BUCKET}" --recursive --region ${{ env.AWS_REGION }}
+            echo "S3 bucket emptied successfully."
+          else
+            echo "No frontend_bucket output found or bucket is empty — skipping."
+          fi
+
+      # FIX #3: Delete all images from ECR repos before destroy so Terraform can remove them
+      - name: Empty ECR Repositories Before Destroy
+        if: inputs.action == 'destroy'
+        run: |
+          SERVICES=("product-service" "cart-service" "user-service" "order-service" "shipping-service")
+          for SERVICE in "${SERVICES[@]}"; do
+            REPO="ecommerce/${SERVICE}"
+            echo "Checking ECR repo: $REPO"
+            EXISTS=$(aws ecr describe-repositories --repository-names "$REPO" --region ${{ env.AWS_REGION }} 2>/dev/null && echo "yes" || echo "no")
+            if [ "$EXISTS" = "yes" ]; then
+              IMAGE_IDS=$(aws ecr list-images \
+                --repository-name "$REPO" \
+                --region ${{ env.AWS_REGION }} \
+                --query 'imageIds[*]' \
+                --output json)
+              if [ "$IMAGE_IDS" != "[]" ] && [ -n "$IMAGE_IDS" ]; then
+                echo "Deleting images from $REPO..."
+                aws ecr batch-delete-image \
+                  --repository-name "$REPO" \
+                  --region ${{ env.AWS_REGION }} \
+                  --image-ids "$IMAGE_IDS"
+                echo "Images deleted from $REPO."
+              else
+                echo "No images found in $REPO — skipping."
+              fi
+            else
+              echo "Repo $REPO does not exist — skipping."
+            fi
+          done
+
       - name: Create tfvars
+        if: inputs.action != 'destroy'
         run: |
           cat > terraform/environments/${{ inputs.environment }}/terraform.auto.tfvars << EOF
-          admin_email = "${{ secrets.ADMIN_EMAIL }}"
-          domain_name = "${{ secrets.DOMAIN_NAME }}"
-          acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
-          environment = "${{ inputs.environment }}"
-          aws_region = "us-east-1"
-          project_name = "ecommerce"
-          time_period_start = "2026-06-01_00:00"
+          admin_email          = "${{ secrets.ADMIN_EMAIL }}"
+          domain_name          = "${{ secrets.DOMAIN_NAME }}"
+          acm_certificate_arn  = "${{ secrets.ACM_CERT_ARN }}"
+          environment          = "${{ inputs.environment }}"
+          aws_region           = "${{ env.AWS_REGION }}"
+          project_name         = "ecommerce"
+          time_period_start    = "2026-06-01_00:00"
           EOF
 
-      - name: Terraform ${{ inputs.action == 'destroy' && 'Destroy' || 'Apply' }}
+      - name: Terraform Init
         run: |
           cd terraform/environments/${{ inputs.environment }}
           terraform init -reconfigure \
             -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
             -backend-config="key=${{ inputs.environment }}/terraform.tfstate" \
-            -backend-config="region=us-east-1"
+            -backend-config="region=${{ env.AWS_REGION }}"
 
-          if [ "${{ inputs.action }}" = "destroy" ]; then
-            terraform destroy -auto-approve
-          else
-            terraform apply -auto-approve
-          fi
+      - name: Terraform Apply
+        if: inputs.action != 'destroy'
+        run: |
+          cd terraform/environments/${{ inputs.environment }}
+          terraform apply -auto-approve
+
+      - name: Terraform Destroy
+        if: inputs.action == 'destroy'
+        run: |
+          cd terraform/environments/${{ inputs.environment }}
+          terraform destroy -auto-approve
 
   # Deploy Frontend (Only on deploy-all)
   deploy-frontend:
@@ -150,41 +218,84 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Create Frontend .env
         run: |
-          USER_POOL_ID=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/cognito/user-pool-id" --region $AWS_REGION --query 'Parameter.Value' --output text)
-          CLIENT_ID=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/cognito/client-id" --region $AWS_REGION --query 'Parameter.Value' --output text)
-          API_URL=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/api-url" --region $AWS_REGION --query 'Parameter.Value' --output text)
+          USER_POOL_ID=$(aws ssm get-parameter \
+            --name "/ecommerce/${{ inputs.environment }}/cognito/user-pool-id" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Parameter.Value' \
+            --output text)
+
+          CLIENT_ID=$(aws ssm get-parameter \
+            --name "/ecommerce/${{ inputs.environment }}/cognito/client-id" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Parameter.Value' \
+            --output text)
+
+          API_URL=$(aws ssm get-parameter \
+            --name "/ecommerce/${{ inputs.environment }}/api-url" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Parameter.Value' \
+            --output text)
+
           cat > frontend/react-vite-app/.env << EOF
           VITE_COGNITO_USER_POOL_ID=${USER_POOL_ID}
           VITE_COGNITO_USER_POOL_CLIENT_ID=${CLIENT_ID}
           VITE_API_BASE_URL=${API_URL}
           EOF
-          echo ".env created!"
-      - name: Build & Deploy
+
+          echo ".env created successfully!"
+
+      - name: Build Frontend
         run: |
           cd frontend/react-vite-app
           npm ci
           npm run build
-          cd ../terraform/environments/${{ inputs.environment }}
-          terraform init -reconfigure -backend-config="key=${{ inputs.environment }}/terraform.tfstate" > /dev/null 2>&1
-          BUCKET=$(terraform output -raw frontend_bucket)
-          CF_ID=$(terraform output -raw cloudfront_id)
-          cd ../../../frontend/react-vite-app
-          aws s3 sync dist/ "s3://${BUCKET}/" --delete --exclude "images/*"
-          aws cloudfront create-invalidation --distribution-id "$CF_ID" --paths "/*"
+
+      - name: Get Terraform Outputs
+        id: tf-outputs
+        run: |
+          cd terraform/environments/${{ inputs.environment }}
+          terraform init -reconfigure \
+            -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
+            -backend-config="key=${{ inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" > /dev/null 2>&1
+          echo "bucket=$(terraform output -raw frontend_bucket)" >> $GITHUB_OUTPUT
+          echo "cf_id=$(terraform output -raw cloudfront_id)" >> $GITHUB_OUTPUT
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync frontend/react-vite-app/dist/ \
+            "s3://${{ steps.tf-outputs.outputs.bucket }}/" \
+            --delete \
+            --exclude "images/*" \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tf-outputs.outputs.cf_id }}" \
+            --paths "/*" \
+            --region ${{ env.AWS_REGION }}
+          echo "Frontend deployed and CDN cache invalidated!"
 
   # Seed Product Data (Only on deploy-all)
   seed-data:
@@ -194,23 +305,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Install jq
         run: sudo apt-get install -y jq
-      - name: Upload Images to S3
+
+      - name: Upload Product Images to S3
         run: |
           cd data
-          bash upload-images-to-s3.sh ${{ inputs.environment }} $AWS_REGION
-      - name: Update Image URLs
+          bash upload-images-to-s3.sh ${{ inputs.environment }} ${{ env.AWS_REGION }}
+
+      - name: Update Image URLs in Product Data
         run: |
           cd data
-          bash update-product-image-urls.sh ${{ inputs.environment }} $AWS_REGION
+          bash update-product-image-urls.sh ${{ inputs.environment }} ${{ env.AWS_REGION }}
+
       - name: Load Products into DynamoDB
         run: |
           cd data
-          bash load-products.sh ${{ inputs.environment }} $AWS_REGION
+          bash load-products.sh ${{ inputs.environment }} ${{ env.AWS_REGION }}

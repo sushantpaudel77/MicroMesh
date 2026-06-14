@@ -162,6 +162,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+
       - name: Create Frontend .env
         run: |
           USER_POOL_ID=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/cognito/user-pool-id" --region $AWS_REGION --query 'Parameter.Value' --output text)
@@ -173,18 +174,28 @@ jobs:
           VITE_API_BASE_URL=${API_URL}
           EOF
           echo ".env created!"
+
       - name: Build & Deploy
         run: |
+          # Build frontend
           cd frontend/react-vite-app
           npm ci
           npm run build
-          cd ../terraform/environments/${{ inputs.environment }}
+          
+          # Get S3 bucket from Terraform
+          cd ../../terraform/environments/${{ inputs.environment }}
           terraform init -reconfigure -backend-config="key=${{ inputs.environment }}/terraform.tfstate" > /dev/null 2>&1
           BUCKET=$(terraform output -raw frontend_bucket)
           CF_ID=$(terraform output -raw cloudfront_id)
+          
+          # Deploy to S3
           cd ../../../frontend/react-vite-app
-          aws s3 sync dist/ "s3://${BUCKET}/" --delete --exclude "images/*"
-          aws cloudfront create-invalidation --distribution-id "$CF_ID" --paths "/*"
+          aws s3 sync dist/ "s3://${BUCKET}/" --delete --exclude "images/*" --region $AWS_REGION
+          
+          # Invalidate CloudFront
+          aws cloudfront create-invalidation --distribution-id "$CF_ID" --paths "/*" --region $AWS_REGION
+          
+          echo "Frontend deployed!"
 
   # Seed Product Data (Only on deploy-all)
   seed-data:

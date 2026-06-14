@@ -16,6 +16,7 @@ on:
         type: choice
         options:
           - deploy-all
+          - deploy-infra-only
           - destroy
           - build-only
 
@@ -24,9 +25,10 @@ env:
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
 jobs:
-  # Build & Push Docker Images
+  # Build & Push (Skip on destroy)
   build-and-push:
     name: Build & Push Images
+    if: inputs.action != 'destroy'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -58,9 +60,10 @@ jobs:
           push: true
           tags: ${{ env.ECR_REGISTRY }}/ecommerce/${{ matrix.service }}:latest
 
-  # Package Lambda
+  # Package Lambda (Skip on destroy)
   package-lambda:
     name: Package Lambda
+    if: inputs.action != 'destroy'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +78,7 @@ jobs:
           path: shipping-processor.zip
           retention-days: 1
 
-  # Terraform Infrastructure
+  # Terraform (Always runs for deploy/destroy)
   terraform:
     name: Terraform - ${{ inputs.environment }}
     needs: [build-and-push, package-lambda]
@@ -93,11 +96,26 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+
+      # Download Lambda (skip on destroy)
       - name: Download Lambda
+        if: inputs.action != 'destroy'
         uses: actions/download-artifact@v4
         with:
           name: lambda-zip
           path: terraform/modules/lambda/
+
+      - name: Empty S3 Bucket
+        if: inputs.action == 'destroy'
+        run: |
+          cd terraform/environments/${{ inputs.environment }}
+          terraform init -reconfigure -backend-config="key=${{ inputs.environment }}/terraform.tfstate" > /dev/null 2>&1
+          BUCKET=$(terraform output -raw frontend_bucket 2>/dev/null || echo "")
+          if [ -n "$BUCKET" ] && [ "$BUCKET" != "None" ]; then
+            echo "Emptying: $BUCKET"
+            aws s3 rm "s3://${BUCKET}" --recursive --region $AWS_REGION || true
+          fi
+
       - name: Create tfvars
         run: |
           cat > terraform/environments/${{ inputs.environment }}/terraform.auto.tfvars << EOF
@@ -109,6 +127,7 @@ jobs:
           project_name = "ecommerce"
           time_period_start = "2026-06-01_00:00"
           EOF
+
       - name: Terraform ${{ inputs.action == 'destroy' && 'Destroy' || 'Apply' }}
         run: |
           cd terraform/environments/${{ inputs.environment }}
@@ -123,7 +142,7 @@ jobs:
             terraform apply -auto-approve
           fi
 
-  # Deploy Frontend
+  # Deploy Frontend (Only on deploy-all)
   deploy-frontend:
     name: Deploy Frontend
     needs: terraform
@@ -143,37 +162,31 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-
       - name: Create Frontend .env
         run: |
           USER_POOL_ID=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/cognito/user-pool-id" --region $AWS_REGION --query 'Parameter.Value' --output text)
           CLIENT_ID=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/cognito/client-id" --region $AWS_REGION --query 'Parameter.Value' --output text)
           API_URL=$(aws ssm get-parameter --name "/ecommerce/${{ inputs.environment }}/api-url" --region $AWS_REGION --query 'Parameter.Value' --output text)
-
           cat > frontend/react-vite-app/.env << EOF
           VITE_COGNITO_USER_POOL_ID=${USER_POOL_ID}
           VITE_COGNITO_USER_POOL_CLIENT_ID=${CLIENT_ID}
           VITE_API_BASE_URL=${API_URL}
           EOF
-
           echo ".env created!"
-
-      - name: Build Frontend
+      - name: Build & Deploy
         run: |
           cd frontend/react-vite-app
           npm ci
           npm run build
-      - name: Deploy to S3
-        run: |
-          cd terraform/environments/${{ inputs.environment }}
+          cd ../terraform/environments/${{ inputs.environment }}
           terraform init -reconfigure -backend-config="key=${{ inputs.environment }}/terraform.tfstate" > /dev/null 2>&1
           BUCKET=$(terraform output -raw frontend_bucket)
           CF_ID=$(terraform output -raw cloudfront_id)
           cd ../../../frontend/react-vite-app
-          aws s3 sync dist/ "s3://${BUCKET}/" --delete
+          aws s3 sync dist/ "s3://${BUCKET}/" --delete --exclude "images/*"
           aws cloudfront create-invalidation --distribution-id "$CF_ID" --paths "/*"
 
-  # Seed Product Data
+  # Seed Product Data (Only on deploy-all)
   seed-data:
     name: Seed Product Data
     needs: terraform

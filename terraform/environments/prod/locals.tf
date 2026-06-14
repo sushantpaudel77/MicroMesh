@@ -60,18 +60,17 @@ locals {
         redis = { from = 6379, to = 6379, proto = "tcp", source_sg = "ecs" }
       }
     }
-
   }
 
-  # Services Configuration 
+  # Services Configuration - PROD specs
   services = {
     product = {
       name         = "product-service"
       port         = 8001
       health_path  = "/health"
-      cpu          = 256
-      memory       = 512
-      desired      = 1
+      cpu          = 512
+      memory       = 1024
+      desired      = 2
       alb_priority = 1
       path_pattern = "/products*"
     }
@@ -79,9 +78,9 @@ locals {
       name         = "cart-service"
       port         = 8002
       health_path  = "/health"
-      cpu          = 256
-      memory       = 512
-      desired      = 1
+      cpu          = 512
+      memory       = 1024
+      desired      = 2
       alb_priority = 2
       path_pattern = "/cart*"
     }
@@ -89,9 +88,9 @@ locals {
       name         = "user-service"
       port         = 8003
       health_path  = "/health"
-      cpu          = 256
-      memory       = 512
-      desired      = 1
+      cpu          = 512
+      memory       = 1024
+      desired      = 2
       alb_priority = 3
       path_pattern = "/users*"
     }
@@ -99,9 +98,9 @@ locals {
       name         = "order-service"
       port         = 8004
       health_path  = "/health"
-      cpu          = 256
-      memory       = 512
-      desired      = 1
+      cpu          = 512
+      memory       = 1024
+      desired      = 2
       alb_priority = 4
       path_pattern = "/orders*"
     }
@@ -109,9 +108,9 @@ locals {
       name         = "shipping-service"
       port         = 8005
       health_path  = "/health"
-      cpu          = 256
-      memory       = 512
-      desired      = 1
+      cpu          = 512
+      memory       = 1024
+      desired      = 2
       alb_priority = 5
       path_pattern = "/shipments*"
     }
@@ -126,7 +125,6 @@ locals {
       billing_mode  = "PAY_PER_REQUEST"
       gsis          = {}
     }
-
     cart = {
       name          = "${local.name_prefix}-cart"
       hash_key      = "user_id"
@@ -134,13 +132,11 @@ locals {
       billing_mode  = "PAY_PER_REQUEST"
       gsis          = {}
     }
-
     shipping = {
       name          = "${local.name_prefix}-shipping"
       hash_key      = "shipment_id"
       hash_key_type = "S"
       billing_mode  = "PAY_PER_REQUEST"
-
       gsis = {
         order_id = {
           name           = "order_id-index"
@@ -148,14 +144,12 @@ locals {
           hash_key_type  = "N"
           attribute_type = "N"
         }
-
         tracking = {
           name           = "tracking_number-index"
           hash_key       = "tracking_number"
           hash_key_type  = "S"
           attribute_type = "S"
         }
-
         user_id = {
           name           = "user_id-index"
           hash_key       = "user_id"

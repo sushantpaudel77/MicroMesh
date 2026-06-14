@@ -92,123 +92,65 @@ jobs:
   # Terraform (Always runs for deploy/destroy)
   terraform:
     name: Terraform - ${{ inputs.environment }}
-    needs: [build-and-push, package-lambda]
-    # FIX #1: Use always() so this job runs even when upstream jobs are skipped (e.g. on destroy)
-    if: always() && inputs.action != 'build-only'
+    # No needs - runs independently
+    if: inputs.action != 'build-only'
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      # Download Lambda artifact (skip on destroy)
-      - name: Download Lambda Artifact
+      - name: Download Lambda
         if: inputs.action != 'destroy'
         uses: actions/download-artifact@v4
         with:
           name: lambda-zip
           path: terraform/modules/lambda/
 
-      # FIX #2: Properly empty S3 before destroy with visible error output
-      - name: Empty S3 Bucket Before Destroy
+      - name: Empty S3 Bucket
         if: inputs.action == 'destroy'
         run: |
           cd terraform/environments/${{ inputs.environment }}
-
-          echo "Initializing Terraform to read state..."
-          terraform init -reconfigure \
-            -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
-            -backend-config="key=${{ inputs.environment }}/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}"
-
-          if [ $? -ne 0 ]; then
-            echo "ERROR: Terraform init failed. Cannot read state to find S3 bucket."
-            exit 1
-          fi
-
+          terraform init -reconfigure -backend-config="key=${{ inputs.environment }}/terraform.tfstate" > /dev/null 2>&1
           BUCKET=$(terraform output -raw frontend_bucket 2>/dev/null || echo "")
           if [ -n "$BUCKET" ] && [ "$BUCKET" != "None" ]; then
-            echo "Emptying S3 bucket: $BUCKET"
-            aws s3 rm "s3://${BUCKET}" --recursive --region ${{ env.AWS_REGION }}
-            echo "S3 bucket emptied successfully."
-          else
-            echo "No frontend_bucket output found or bucket is empty — skipping."
+            echo "Emptying: $BUCKET"
+            aws s3 rm "s3://${BUCKET}" --recursive --region $AWS_REGION || true
           fi
 
-      # FIX #3: Delete all images from ECR repos before destroy so Terraform can remove them
-      - name: Empty ECR Repositories Before Destroy
-        if: inputs.action == 'destroy'
-        run: |
-          SERVICES=("product-service" "cart-service" "user-service" "order-service" "shipping-service")
-          for SERVICE in "${SERVICES[@]}"; do
-            REPO="ecommerce/${SERVICE}"
-            echo "Checking ECR repo: $REPO"
-            EXISTS=$(aws ecr describe-repositories --repository-names "$REPO" --region ${{ env.AWS_REGION }} 2>/dev/null && echo "yes" || echo "no")
-            if [ "$EXISTS" = "yes" ]; then
-              IMAGE_IDS=$(aws ecr list-images \
-                --repository-name "$REPO" \
-                --region ${{ env.AWS_REGION }} \
-                --query 'imageIds[*]' \
-                --output json)
-              if [ "$IMAGE_IDS" != "[]" ] && [ -n "$IMAGE_IDS" ]; then
-                echo "Deleting images from $REPO..."
-                aws ecr batch-delete-image \
-                  --repository-name "$REPO" \
-                  --region ${{ env.AWS_REGION }} \
-                  --image-ids "$IMAGE_IDS"
-                echo "Images deleted from $REPO."
-              else
-                echo "No images found in $REPO — skipping."
-              fi
-            else
-              echo "Repo $REPO does not exist — skipping."
-            fi
-          done
-
       - name: Create tfvars
-        if: inputs.action != 'destroy'
         run: |
           cat > terraform/environments/${{ inputs.environment }}/terraform.auto.tfvars << EOF
-          admin_email          = "${{ secrets.ADMIN_EMAIL }}"
-          domain_name          = "${{ secrets.DOMAIN_NAME }}"
-          acm_certificate_arn  = "${{ secrets.ACM_CERT_ARN }}"
-          environment          = "${{ inputs.environment }}"
-          aws_region           = "${{ env.AWS_REGION }}"
-          project_name         = "ecommerce"
-          time_period_start    = "2026-06-01_00:00"
+          admin_email = "${{ secrets.ADMIN_EMAIL }}"
+          domain_name = "${{ secrets.DOMAIN_NAME }}"
+          acm_certificate_arn = "${{ secrets.ACM_CERT_ARN }}"
+          environment = "${{ inputs.environment }}"
+          aws_region = "us-east-1"
+          project_name = "ecommerce"
+          time_period_start = "2026-06-01_00:00"
           EOF
 
-      - name: Terraform Init
+      - name: Terraform ${{ inputs.action == 'destroy' && 'Destroy' || 'Apply' }}
         run: |
           cd terraform/environments/${{ inputs.environment }}
           terraform init -reconfigure \
             -backend-config="bucket=ecommerce-terraform-state-cloudnerd" \
             -backend-config="key=${{ inputs.environment }}/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}"
+            -backend-config="region=us-east-1"
 
-      - name: Terraform Apply
-        if: inputs.action != 'destroy'
-        run: |
-          cd terraform/environments/${{ inputs.environment }}
-          terraform apply -auto-approve
-
-      - name: Terraform Destroy
-        if: inputs.action == 'destroy'
-        run: |
-          cd terraform/environments/${{ inputs.environment }}
-          terraform destroy -auto-approve
+          if [ "${{ inputs.action }}" = "destroy" ]; then
+            terraform destroy -auto-approve
+          else
+            terraform apply -auto-approve
+          fi
 
   # Deploy Frontend (Only on deploy-all)
   deploy-frontend:

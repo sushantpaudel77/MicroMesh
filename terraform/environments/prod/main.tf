@@ -7,7 +7,7 @@ module "vpc" {
   vpc_cidr      = var.vpc_cidr
   azs           = local.azs
   subnets       = local.subnets
-  nat_single_az = true # Dev uses single NAT
+  nat_single_az = false  # PROD: Multi-AZ NAT Gateways
   tags          = var.tags
 }
 
@@ -55,7 +55,7 @@ module "dynamodb" {
   tags        = var.tags
 }
 
-# MODULE: RDS
+# MODULE: RDS - PROD values
 module "rds" {
   source = "../../modules/rds"
 
@@ -64,16 +64,16 @@ module "rds" {
   subnet_ids          = module.vpc.database_subnet_ids
   security_group_id   = module.security_groups.sg_ids["rds"]
   db_password         = module.secrets.db_password
-  instance_class      = "db.t4g.micro"
-  allocated_storage   = 20
-  multi_az            = false
-  backup_days         = 0
-  deletion_protection = false
-  skip_final_snapshot = true
+  instance_class      = "db.t4g.small"    # PROD: larger instance
+  allocated_storage   = 100               # PROD: more storage
+  multi_az            = true              # PROD: Multi-AZ
+  backup_days         = 30               # PROD: 30 day backups
+  deletion_protection = true             # PROD: protect from deletion
+  skip_final_snapshot = false            # PROD: take final snapshot
   tags                = var.tags
 }
 
-# MODULE: ElastiCache
+# MODULE: ElastiCache - PROD values
 module "elasticache" {
   source = "../../modules/elasticache"
 
@@ -81,8 +81,8 @@ module "elasticache" {
   project_name      = var.project_name
   subnet_ids        = module.vpc.ecs_subnet_ids
   security_group_id = module.security_groups.sg_ids["elasticache"]
-  node_type         = "cache.t3.micro"
-  num_nodes         = 1
+  node_type         = "cache.t3.medium"  # PROD: larger node
+  num_nodes         = 2                  # PROD: multi-node
   tags              = var.tags
 }
 
@@ -127,26 +127,24 @@ module "ecs" {
 
   target_groups = module.alb.target_group_arns
 
-  # Database
   db_secret_arn = module.secrets.secret_arn
 
-  # Redis
   redis_host = module.elasticache.endpoint
   redis_port = "6379"
 
-  # DynamoDB Table Names (NEW)
   dynamodb_table_names = module.dynamodb.table_names
 
   tags = var.tags
 }
-# MODULE: Cognito
+
+# MODULE: Cognito - PROD domain
 module "cognito" {
   source = "../../modules/cognito"
 
   environment   = var.environment
   project_name  = var.project_name
-  callback_urls = ["https://dev.${var.domain_name}"]
-  logout_urls   = ["https://dev.${var.domain_name}"]
+  callback_urls = ["https://${var.domain_name}", "https://www.${var.domain_name}"]
+  logout_urls   = ["https://${var.domain_name}", "https://www.${var.domain_name}"]
   tags          = var.tags
 }
 
@@ -157,7 +155,7 @@ module "sns" {
   environment  = var.environment
   project_name = var.project_name
   topics       = local.sns_topics
-  admin_email  = var.admin_email # System alarms
+  admin_email  = var.admin_email
   tags         = var.tags
 }
 
@@ -199,12 +197,11 @@ module "api_gateway" {
   cognito_user_pool_arn = module.cognito.pool_arn
   cognito_user_pool_id  = module.cognito.pool_id
   cognito_client_id     = module.cognito.client_id
-  frontend_domain       = "dev.${var.domain_name}"
+  frontend_domain       = var.domain_name
   tags                  = var.tags
 }
 
-# MODULE: WAF
-# CloudFront-scoped WAF MUST be in us-east-1 — use the alias provider
+# MODULE: WAF - PROD enables rate limiting
 module "waf" {
   source = "../../modules/waf"
   providers = {
@@ -213,13 +210,12 @@ module "waf" {
 
   environment          = var.environment
   project_name         = var.project_name
-  enable_rate_limiting = false
-  rate_limit           = 200
+  enable_rate_limiting = true   # PROD: enable rate limiting
+  rate_limit           = 2000
   tags                 = var.tags
 }
 
-# MODULE: Frontend
-# S3 + CloudFront resources must be in us-east-1
+# MODULE: Frontend - PROD domain
 module "frontend" {
   source = "../../modules/frontend"
   providers = {
@@ -229,7 +225,7 @@ module "frontend" {
   environment         = var.environment
   project_name        = var.project_name
   domain_name         = var.domain_name
-  subdomain           = "dev"
+  subdomain           = ""          # PROD: no subdomain
   acm_certificate_arn = var.acm_certificate_arn
   waf_acl_arn         = module.waf.web_acl_arn
   api_endpoint        = module.api_gateway.api_endpoint
@@ -257,7 +253,6 @@ module "ssm" {
   project_name = var.project_name
   aws_region   = var.aws_region
 
-  # Service URLs pointing to ALB
   service_urls = {
     alb_dns = module.alb.alb_dns
     services = {
@@ -269,28 +264,23 @@ module "ssm" {
     }
   }
 
-  # Database endpoints
   rds_endpoint   = module.rds.address
   redis_endpoint = module.elasticache.endpoint
 
-  # SNS Topic ARNs
   sns_topic_arns = {
     order    = module.sns.topic_arns["order_events"]
     shipping = module.sns.topic_arns["shipping_events"]
   }
 
-  # DynamoDB table names
   dynamodb_table_names = {
     products = module.dynamodb.table_names["products"]
     cart     = module.dynamodb.table_names["cart"]
     shipping = module.dynamodb.table_names["shipping"]
   }
 
-  # Cognito
   cognito_pool_id   = module.cognito.pool_id
   cognito_client_id = module.cognito.client_id
 
-  # Custom parameters
   parameters = {
     environment = {
       name        = "environment"
@@ -302,7 +292,7 @@ module "ssm" {
       name        = "frontend-url"
       description = "Frontend application URL"
       type        = "String"
-      value       = "https://dev.${var.domain_name}"
+      value       = "https://${var.domain_name}"
     }
     api_url = {
       name        = "api-url"
@@ -331,35 +321,25 @@ module "route53" {
 
   domain_name               = var.domain_name
   cloudfront_domain_name    = module.frontend.cloudfront_domain
-  cloudfront_hosted_zone_id = "Z2FDTNDATAQYW2" # CloudFront fixed zone ID
+  cloudfront_hosted_zone_id = "Z2FDTNDATAQYW2"
 
-  # Create dev subdomain for dev environment
-  create_dev_record = var.environment == "dev" ? true : false
+  create_dev_record = false  # PROD: no dev subdomain
 
   depends_on = [module.frontend]
 
   tags = var.tags
 }
 
-# module "ecr" {
-#   source = "../../modules/ecr"
-
-#   environment  = var.environment
-#   project_name = var.project_name
-#   services     = local.services
-#   tags         = var.tags
-# }
-
-# MODULE: Budget
+# MODULE: Budget - PROD higher budget
 module "budget" {
   source = "../../modules/budget"
 
   environment              = var.environment
   project_name             = var.project_name
-  budget_amount            = 10
-  notification_email       = var.admin_email 
+  budget_amount            = 50   # PROD: $50 budget
+  notification_email       = var.admin_email
   sns_topic_arns           = [module.sns.topic_arns["alarms"]]
-  enable_anomaly_detection = false
+  enable_anomaly_detection = true  # PROD: enable anomaly detection
 
   tags = var.tags
 }

@@ -341,14 +341,14 @@ module "route53" {
   tags = var.tags
 }
 
-module "ecr" {
-  source = "../../modules/ecr"
+# module "ecr" {
+#   source = "../../modules/ecr"
 
-  environment  = var.environment
-  project_name = var.project_name
-  services     = local.services
-  tags         = var.tags
-}
+#   environment  = var.environment
+#   project_name = var.project_name
+#   services     = local.services
+#   tags         = var.tags
+# }
 
 # MODULE: Budget
 module "budget" {
